@@ -1,0 +1,14 @@
+# Компилиране
+build/
+dist/
+*.spec
+
+# Python
+__pycache__/
+*.py[cod]
+
+# Данни на приложението (пазят се в %APPDATA%, не тук)
+*.db
+*.db-shm
+*.db-wal
+settings.json
