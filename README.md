@@ -20,10 +20,21 @@ Windows приложение за играта **Kapilands** (bg.kapilands.eu и
 
 ---
 
-## Стартиране
+## Инсталиране
 
-Свали `Kapilands-Taymer.exe` от [Releases](https://github.com/esmobg/capiland-app/releases)
-и го пусни с двоен клик. Не иска инсталация.
+От [Releases](https://github.com/esmobg/capiland-app/releases) свали едното:
+
+- **`Kapilands-Taymer-2.0-Setup.exe`** — инсталатор на български. Слага
+  приложението в менюто „Старт“, по желание на работния плот и в автоматично
+  стартиране, и се маха от „Приложения“ в Настройки на Windows. Инсталира се
+  **само за теб, без прозорец за администратор** — прозорецът на UAC е на
+  защитен екран, където четецът говори само ако е настроен за това. Всеки
+  бутон и отметка в съветника има име за четеца.
+- **`Kapilands-Taymer.exe`** — същото приложение без инсталиране; пуска се с
+  двоен клик.
+
+Деинсталирането не трие данните ти (`%APPDATA%\KapilandsTimer`), така че
+таймерите остават при преинсталиране или обновяване.
 
 От изходния код (Python 3.10 или по-нов):
 
@@ -209,9 +220,15 @@ python tools/nvda_check.py
 
 ---
 
-## Правене на .exe
+## Правене на .exe и инсталатор
 
-Двоен клик на `build_exe.bat`. Резултатът е `dist\Kapilands-Taymer.exe`.
+1. `build_exe.bat` → `dist\Kapilands-Taymer.exe`
+2. `build_installer.bat` → `dist\Kapilands-Taymer-2.0-Setup.exe` (нужен е
+   [Inno Setup 6](https://jrsoftware.org/isinfo.php); скриптът е
+   `installer\kapilands.iss`)
+
+`python tools/installer_check.py` минава през съветника, проверява имената на
+елементите, инсталира във временна папка, стартира и деинсталира.
 
 ---
 
@@ -231,7 +248,8 @@ kapiland/
   a11y.py                 контраст, текстови състояния, клавиши
   wxui/                   интерфейсът
 vendor/nvda/              NVDA Controller Client (LGPL-2.1)
-tools/                    UIA одит и проверка с NVDA
+installer/                скрипт за инсталатора (Inno Setup)
+tools/                    UIA одит, проверка с NVDA и на инсталатора
 tests/                    286 теста
 docs/ACCESSIBILITY.md     достъпност по WCAG 2.1 AA
 ```
