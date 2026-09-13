@@ -8,11 +8,20 @@ from pathlib import Path
 
 APP_NAME = "KapilandsTimer"
 APP_TITLE = "Kapilands Таймер"
-APP_VERSION = "1.0.0"
+APP_VERSION = "2.0.0"
 
 
 def data_dir() -> Path:
-    r"""Папката с базата и настройките (%APPDATA%\KapilandsTimer)."""
+    r"""Папката с базата и настройките (%APPDATA%\KapilandsTimer).
+
+    ``KAPILANDS_DATA_DIR`` я пренасочва — за тестове и проверки, без да се
+    пипа APPDATA (там Python държи и инсталираните библиотеки).
+    """
+    override = os.environ.get("KAPILANDS_DATA_DIR")
+    if override:
+        path = Path(override)
+        path.mkdir(parents=True, exist_ok=True)
+        return path
     base = os.environ.get("APPDATA") or os.path.expanduser("~")
     path = Path(base) / APP_NAME
     path.mkdir(parents=True, exist_ok=True)
@@ -40,8 +49,13 @@ DEFAULTS: dict = {
     "window_geometry": "",
     "last_type": "production",
     # достъпност
-    "theme": "light",          # light | dark | contrast
+    "theme": "system",         # system | light | dark
     "font_scale": 100,         # 100 – 200 %
+    "speech_mode": "auto",     # auto | always | never — говор през четеца
+    "reader_mode": "auto",     # auto | on | off — списък без тиктакащи секунди
+    "global_hotkeys": True,    # Ctrl+Alt+K и Ctrl+Alt+J от всеки прозорец
+    "toast_when_speaking": False,  # и Windows известие, когато четецът е говорил
+    "default_world": "",
 }
 
 

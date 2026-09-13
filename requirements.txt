@@ -1,9 +1,15 @@
-# Приложението работи и без нищо от този списък - Windows известията
-# минават през вграден PowerShell скрипт, а всичко останало е от
-# стандартната библиотека на Python (tkinter, sqlite3, winsound).
+# Интерфейс с истински Windows елементи — четат се от NVDA, JAWS и Narrator.
+wxPython>=4.3.1
 
-# По желание: по-богати Windows известия (с икона и звукова схема).
+# Говор през JAWS (COM). NVDA ползва vendor/nvda/x64/nvdaControllerClient.dll.
+comtypes>=1.4
+
+# По желание: по-богати Windows известия. Без него известията минават
+# през вграден PowerShell скрипт.
 winotify>=1.1.0
 
-# Само за правене на самостоятелен .exe (виж build_exe.bat).
+# Само за правене на .exe (build_exe.bat).
 pyinstaller>=6.0
+
+# Само за проверките tools/uia_audit.py и tools/nvda_check.py.
+uiautomation>=2.0

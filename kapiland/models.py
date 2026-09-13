@@ -11,6 +11,7 @@ class TimerType(str, Enum):
     RESEARCH = "research"
     SALE = "sale"
     BUILD = "build"
+    EXPAND = "expand"
     TRANSPORT = "transport"
 
 
@@ -19,6 +20,7 @@ TYPE_LABELS: dict[str, str] = {
     TimerType.RESEARCH.value: "Наука",
     TimerType.SALE.value: "Продажба",
     TimerType.BUILD.value: "Строеж",
+    TimerType.EXPAND.value: "Разширяване",
     TimerType.TRANSPORT.value: "Транспорт",
 }
 
@@ -30,6 +32,7 @@ TYPE_ACTIONS: dict[str, str] = {
     TimerType.RESEARCH.value: "Пусни следващото изследване.",
     TimerType.SALE.value: "Офертата изтече — прибери парите и пусни нова.",
     TimerType.BUILD.value: "Строежът е готов — пусни следващия.",
+    TimerType.EXPAND.value: "Разширяването е готово — пусни следващото.",
     TimerType.TRANSPORT.value: "Превозът пристигна — разтовари и пусни следващия.",
 }
 
@@ -66,7 +69,9 @@ class Timer:
     quality: str = ""          # качество според играта: Q1, А, високо…
     type: str = TimerType.PRODUCTION.value
     quantity: float = 0.0
-    line: str = ""
+    line: str = ""             # компанията (акаунтът) в играта
+    world: str = ""            # светът: „Немска двойка“, „Българска единица“…
+    building: str = ""         # сградата: „Химически фабрики“…
     start_at: float = 0.0
     end_at: float = 0.0
     duration_sec: int = 0
@@ -130,11 +135,42 @@ class Timer:
 
 
 @dataclass
+class Account:
+    """Компания (акаунт) в един свят на играта."""
+
+    id: int | None = None
+    world: str = ""
+    name: str = ""
+    owner: str = ""            # чия е: „Иван“, „Мария“…
+    buildings: str = ""        # сградите, разделени с „; “
+    note: str = ""
+    created_at: float = 0.0
+
+    @property
+    def building_list(self) -> list[str]:
+        return [b.strip() for b in self.buildings.split(";") if b.strip()]
+
+    def add_building(self, building: str) -> None:
+        building = building.strip()
+        if not building:
+            return
+        current = self.building_list
+        if building.lower() not in (b.lower() for b in current):
+            current.append(building)
+        self.buildings = "; ".join(current)
+
+    @property
+    def display_name(self) -> str:
+        return f"{self.name} ({self.world})" if self.world.strip() else self.name
+
+
+@dataclass
 class Product:
     id: int | None = None
     name: str = ""
     quality: str = ""          # едно име в различно качество = различен запис
     category: str = ""
+    building: str = ""         # в коя сграда се прави или продава
     default_type: str = TimerType.PRODUCTION.value
     default_duration_sec: int = 0
     default_quantity: float = 0.0
@@ -158,7 +194,9 @@ class HistoryEntry:
     quality: str = ""          # качество според играта: Q1, А, високо…
     type: str = TimerType.PRODUCTION.value
     quantity: float = 0.0
-    line: str = ""
+    line: str = ""             # компанията (акаунтът) в играта
+    world: str = ""            # светът: „Немска двойка“, „Българска единица“…
+    building: str = ""         # сградата: „Химически фабрики“…
     start_at: float = 0.0
     end_at: float = 0.0
     duration_sec: int = 0

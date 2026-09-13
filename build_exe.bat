@@ -2,21 +2,16 @@
 chcp 65001 >nul
 rem ===================================================================
 rem  Прави самостоятелен Kapilands-Taymer.exe в папката dist\
-rem  Стартирай с двоен клик или от командния ред.
 rem ===================================================================
 setlocal
 cd /d "%~dp0"
 
 echo.
-echo [1/3] Проверка на PyInstaller...
-python -m PyInstaller --version >nul 2>&1
-if errorlevel 1 (
-    echo      Липсва - инсталирам го...
-    python -m pip install --upgrade pyinstaller
-    if errorlevel 1 goto :error
-)
+echo [1/3] Проверка на зависимостите...
+python -m pip install --quiet --disable-pip-version-check -r requirements.txt
+if errorlevel 1 goto :error
 
-echo [2/3] Пробен пуск на тестовете...
+echo [2/3] Тестове...
 python -m unittest discover -s tests -t . -q
 if errorlevel 1 (
     echo.
@@ -32,13 +27,18 @@ python -m PyInstaller ^
     --windowed ^
     --name "Kapilands-Taymer" ^
     --paths "." ^
-    --hidden-import "kapiland.ui.app" ^
+    --add-binary "vendor\nvda\x64\nvdaControllerClient.dll;vendor\nvda\x64" ^
+    --add-data "vendor\nvda\license.txt;vendor\nvda" ^
+    --add-data "vendor\nvda\README.md;vendor\nvda" ^
+    --hidden-import "kapiland.wxui.app" ^
+    --hidden-import "comtypes.client" ^
+    --exclude-module "tkinter" ^
     main.py
 if errorlevel 1 goto :error
 
 echo.
-echo ГОТОВО. Файлът е: "%cd%\dist\Kapilands-Taymer.exe"
-echo Може да го преместиш където искаш - данните се пазят в %%APPDATA%%\KapilandsTimer.
+echo ГОТОВО: "%cd%\dist\Kapilands-Taymer.exe"
+echo Данните се пазят в %%APPDATA%%\KapilandsTimer.
 echo.
 pause
 exit /b 0

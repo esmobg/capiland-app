@@ -12,3 +12,6 @@ __pycache__/
 *.db-shm
 *.db-wal
 settings.json
+
+# Работни копия и настройки на Claude Code — не са част от проекта
+.claude/

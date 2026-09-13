@@ -277,3 +277,69 @@ def summarize_history(entries: list) -> list[dict]:
 
 def format_money(value: float) -> str:
     return f"{value:,.2f}".replace(",", " ")
+
+
+# ------------------------------------------------- компании и изговаряне
+
+def _company_key(world: str, name: str) -> tuple[str, str]:
+    return (world.strip().lower(), name.strip().lower())
+
+
+def idle_accounts(accounts: list, timers: list[Timer], now: float) -> list:
+    """Компании без нищо, което още тече — там може веднага да се пусне нещо."""
+    busy = {
+        _company_key(t.world, t.line)
+        for t in timers
+        if t.status == TimerStatus.RUNNING.value and t.end_at > now and t.line.strip()
+    }
+    return [a for a in accounts if _company_key(a.world, a.name) not in busy]
+
+
+def account_timers(account, timers: list[Timer]) -> list[Timer]:
+    key = _company_key(account.world, account.name)
+    return sorted((t for t in timers
+                   if t.status == TimerStatus.RUNNING.value
+                   and _company_key(t.world, t.line) == key),
+                  key=lambda t: t.end_at)
+
+
+def group_by_world(timers: list[Timer]) -> dict[str, list[Timer]]:
+    groups: dict[str, list[Timer]] = {}
+    for timer in sorted(timers, key=lambda t: t.end_at):
+        groups.setdefault(timer.world.strip(), []).append(timer)
+    return dict(sorted(groups.items(), key=lambda item: item[0].lower()))
+
+
+def describe_spoken(timer: Timer) -> str:
+    """„1000 Бензин, Алфа маркет 7, Немска двойка“ — кратко, за изговаряне."""
+    what = timer.display_name if timer.product.strip() else type_label(timer.type)
+    parts = [what]
+    if timer.line.strip():
+        parts.append(timer.line.strip())
+    if timer.world.strip():
+        parts.append(timer.world.strip())
+    return ", ".join(parts)
+
+
+def spoken_summary(timers: list[Timer], now: float, limit: int = 3) -> str:
+    """Какво е готово и какво следва — едно изречение за екранния четец."""
+    from .timeutil import format_when_spoken
+
+    running = [t for t in timers if t.status == TimerStatus.RUNNING.value]
+    if not running:
+        return "Няма активни таймери."
+    sentences = []
+    due = sorted(due_now(running, now), key=lambda t: t.end_at)
+    if due:
+        names = "; ".join(describe_spoken(t) for t in due[:limit])
+        more = f"; и още {len(due) - limit}" if len(due) > limit else ""
+        head = "Готово" if len(due) == 1 else f"Готови {len(due)}"
+        sentences.append(f"{head}: {names}{more}.")
+    else:
+        sentences.append("Нищо не е готово.")
+    upcoming = next_due(running, now)
+    if upcoming is not None:
+        sentences.append(
+            f"Следващо: {describe_spoken(upcoming)}, "
+            f"{format_when_spoken(upcoming.end_at, now)}.")
+    return " ".join(sentences)

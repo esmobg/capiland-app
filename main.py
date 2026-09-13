@@ -17,7 +17,6 @@ from pathlib import Path
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 
 from kapiland import config  # noqa: E402
-from kapiland.ui.app import KapilandsApp  # noqa: E402
 
 _MUTEX_NAME = "Global\\KapilandsTimerSingleInstance"
 _ERROR_ALREADY_EXISTS = 183
@@ -79,12 +78,15 @@ def main(argv: list[str] | None = None) -> int:
         settings.save()
 
     try:
-        app = KapilandsApp(args.db)
+        from kapiland.wxui.app import create_app
+
+        app, frame = create_app(args.db)
     except Exception:  # pragma: no cover - показваме грешката, вместо да изчезнем
         _fatal(traceback.format_exc())
         return 1
 
-    app.run()
+    frame.Show()
+    app.MainLoop()
     return 0
 
 

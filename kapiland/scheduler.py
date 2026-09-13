@@ -34,7 +34,8 @@ class Event:
 def build_message(timer: Timer, kind: str, now: float) -> tuple[str, str]:
     """Заглавие и текст на известието."""
     name = timer.display_name
-    where = f" — {timer.line}" if timer.line.strip() else ""
+    places = [p.strip() for p in (timer.line, timer.world) if p.strip()]
+    where = f" — {', '.join(places)}" if places else ""
     action = TYPE_ACTIONS.get(timer.type, "Пусни следващото.")
 
     if kind == EVENT_PREWARN:
@@ -55,11 +56,13 @@ def build_message(timer: Timer, kind: str, now: float) -> tuple[str, str]:
 class Scheduler:
     """Свързва базата с известията."""
 
-    def __init__(self, db, notifier, settings) -> None:
+    def __init__(self, db, notifier, settings, speaker=None) -> None:
         self.db = db
         self.notifier = notifier
         self.settings = settings
+        self.speaker = speaker
         self.last_events: list[Event] = []
+        self.last_spoken: str | None = None
 
     # ------------------------------------------------------------------
 
@@ -133,20 +136,27 @@ class Scheduler:
 
         sound_on = bool(self.settings.get("sound_enabled", True))
         toast_on = bool(self.settings.get("toast_enabled", True))
+
+        if len(events) == 1:
+            title, message, urgent = events[0].title, events[0].message, events[0].urgent
+        else:
+            names = ", ".join(e.timer.display_name for e in events[:4])
+            if len(events) > 4:
+                names += f" и още {len(events) - 4}"
+            word = "неща" if len(events) != 1 else "нещо"
+            title = f"Готови са {len(events)} {word}"
+            if summary_kind == EVENT_MISSED:
+                title = f"Пропуснати са {len(events)} {word}"
+            message, urgent = names, True
+
+        # Първо през екранния четец — с неговия глас и брайл.
+        self.last_spoken = None
+        if self.speaker is not None:
+            self.last_spoken = self.speaker.speak(f"{title}. {message}")
+
         play_sound_async(str(self.settings.get("sound_file", "")), sound_on)
         if not toast_on:
             return
-
-        if len(events) == 1:
-            event = events[0]
-            self.notifier.notify_async(event.title, event.message, event.urgent)
-            return
-
-        names = ", ".join(e.timer.display_name for e in events[:4])
-        if len(events) > 4:
-            names += f" и още {len(events) - 4}"
-        word = "неща" if len(events) != 1 else "нещо"
-        title = f"Готови са {len(events)} {word}"
-        if summary_kind == EVENT_MISSED:
-            title = f"Пропуснати са {len(events)} {word}"
-        self.notifier.notify_async(title, names, urgent=True)
+        if self.last_spoken and not self.settings.get("toast_when_speaking", False):
+            return  # иначе NVDA би прочел същото второ път от известието
+        self.notifier.notify_async(title, message, urgent)

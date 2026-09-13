@@ -165,5 +165,57 @@ class SchedulerTest(unittest.TestCase):
         self.assertIn("изследване", self.notifier.sent[0][1])
 
 
+class FakeSpeaker:
+    def __init__(self, backend="nvda"):
+        self.backend = backend
+        self.said = []
+
+    def speak(self, text, interrupt=False):
+        self.said.append(text)
+        return self.backend
+
+
+class SchedulerSpeechTest(unittest.TestCase):
+    def setUp(self):
+        self.db = Database(":memory:")
+        self.notifier = FakeNotifier()
+
+    def tearDown(self):
+        self.db.close()
+
+    def run_due(self, speaker, **settings):
+        self.db.add_timer(make_timer(product="Бензин", line="Алфа", world="Немска двойка"))
+        sched = Scheduler(self.db, self.notifier, FakeSettings(**settings), speaker=speaker)
+        sched.tick(now=NOW + HOUR)
+        return sched
+
+    def test_screen_reader_hears_the_product_company_and_world(self):
+        speaker = FakeSpeaker()
+        self.run_due(speaker)
+        self.assertEqual(len(speaker.said), 1)
+        for word in ("Готово", "Бензин", "Алфа", "Немска двойка", "Пусни следваща продукция"):
+            self.assertIn(word, speaker.said[0])
+
+    def test_no_second_announcement_through_a_toast_when_the_reader_spoke(self):
+        self.run_due(FakeSpeaker())
+        self.assertEqual(self.notifier.sent, [])
+
+    def test_toast_too_when_asked(self):
+        self.run_due(FakeSpeaker(), toast_when_speaking=True)
+        self.assertEqual(len(self.notifier.sent), 1)
+
+    def test_toast_when_no_reader_could_speak(self):
+        sched = self.run_due(FakeSpeaker(backend=None))
+        self.assertIsNone(sched.last_spoken)
+        self.assertEqual(len(self.notifier.sent), 1)
+
+    def test_several_at_once_are_one_sentence(self):
+        self.db.add_timer(make_timer(product="Газ"))
+        speaker = FakeSpeaker()
+        self.run_due(speaker)
+        self.assertEqual(len(speaker.said), 1)
+        self.assertIn("Готови са 2", speaker.said[0])
+
+
 if __name__ == "__main__":
     unittest.main()

@@ -6,7 +6,7 @@ import sqlite3
 from pathlib import Path
 
 from . import config
-from .models import HistoryEntry, Product, Timer, TimerStatus
+from .models import Account, HistoryEntry, Product, Timer, TimerStatus
 from .timeutil import now as time_now
 
 SCHEMA = """
@@ -15,6 +15,7 @@ CREATE TABLE IF NOT EXISTS products (
     name                 TEXT    NOT NULL,
     quality              TEXT    NOT NULL DEFAULT '',
     category             TEXT    NOT NULL DEFAULT '',
+    building             TEXT    NOT NULL DEFAULT '',
     default_type         TEXT    NOT NULL DEFAULT 'production',
     default_duration_sec INTEGER NOT NULL DEFAULT 0,
     default_quantity     REAL    NOT NULL DEFAULT 0,
@@ -31,6 +32,8 @@ CREATE TABLE IF NOT EXISTS timers (
     type           TEXT    NOT NULL DEFAULT 'production',
     quantity       REAL    NOT NULL DEFAULT 0,
     line           TEXT    NOT NULL DEFAULT '',
+    world          TEXT    NOT NULL DEFAULT '',
+    building       TEXT    NOT NULL DEFAULT '',
     start_at       REAL    NOT NULL,
     end_at         REAL    NOT NULL,
     duration_sec   INTEGER NOT NULL,
@@ -54,6 +57,7 @@ CREATE TABLE IF NOT EXISTS history (
     type         TEXT    NOT NULL DEFAULT 'production',
     quantity     REAL    NOT NULL DEFAULT 0,
     line         TEXT    NOT NULL DEFAULT '',
+    world        TEXT    NOT NULL DEFAULT '',
     start_at     REAL    NOT NULL DEFAULT 0,
     end_at       REAL    NOT NULL DEFAULT 0,
     duration_sec INTEGER NOT NULL DEFAULT 0,
@@ -63,6 +67,22 @@ CREATE TABLE IF NOT EXISTS history (
     note         TEXT    NOT NULL DEFAULT ''
 );
 
+CREATE TABLE IF NOT EXISTS accounts (
+    id          INTEGER PRIMARY KEY AUTOINCREMENT,
+    world       TEXT    NOT NULL DEFAULT '',
+    name        TEXT    NOT NULL,
+    owner       TEXT    NOT NULL DEFAULT '',
+    buildings   TEXT    NOT NULL DEFAULT '',
+    note        TEXT    NOT NULL DEFAULT '',
+    created_at  REAL    NOT NULL DEFAULT 0,
+    UNIQUE(world, name)
+);
+
+CREATE TABLE IF NOT EXISTS meta (
+    key    TEXT PRIMARY KEY,
+    value  TEXT NOT NULL DEFAULT ''
+);
+
 CREATE INDEX IF NOT EXISTS idx_timers_status ON timers(status, end_at);
 CREATE INDEX IF NOT EXISTS idx_history_product ON history(product);
 """
@@ -70,12 +90,17 @@ CREATE INDEX IF NOT EXISTS idx_history_product ON history(product);
 PRODUCTS_SCHEMA = SCHEMA.split("CREATE TABLE IF NOT EXISTS timers")[0]
 
 _TIMER_FIELDS = (
-    "product", "quality", "type", "quantity", "line", "start_at", "end_at", "duration_sec",
+    "product", "quality", "type", "quantity", "line", "world", "building",
+    "start_at", "end_at", "duration_sec",
     "status", "repeat_enabled", "cycles_planned", "cycle_no", "prewarn_sec",
     "notified_at", "prewarned_at", "reminded_at", "missed", "note", "created_at",
 )
+_ACCOUNT_FIELDS = ("world", "name", "owner", "buildings", "note", "created_at")
+
+SCHEMA_VERSION = 2
+
 _PRODUCT_FIELDS = (
-    "name", "quality", "category", "default_type", "default_duration_sec",
+    "name", "quality", "category", "building", "default_type", "default_duration_sec",
     "default_quantity", "unit_cost", "unit_price", "note",
 )
 
@@ -100,13 +125,15 @@ class Database:
 
     def _migrate(self) -> None:
         """Надгражда бази от по-стара версия, без да губи въведеното."""
-        for table in ("timers", "history"):
+        for table, column in (("timers", "quality"), ("history", "quality"),
+                              ("timers", "world"), ("timers", "building"),
+                              ("history", "world")):
             columns = {r["name"] for r in
                        self.conn.execute("PRAGMA table_info(" + table + ")")}
-            if "quality" not in columns:
+            if column not in columns:
                 self.conn.execute(
-                    "ALTER TABLE " + table +
-                    " ADD COLUMN quality TEXT NOT NULL DEFAULT ''")
+                    "ALTER TABLE " + table + " ADD COLUMN " + column +
+                    " TEXT NOT NULL DEFAULT ''")
 
         columns = {r["name"] for r in
                    self.conn.execute("PRAGMA table_info(products)")}
@@ -122,6 +149,14 @@ class Database:
                 + " FROM products_old;"
                 + "DROP TABLE products_old;"
             )
+
+        columns = {r["name"] for r in
+                   self.conn.execute("PRAGMA table_info(products)")}
+        if "building" not in columns:
+            self.conn.execute(
+                "ALTER TABLE products ADD COLUMN building TEXT NOT NULL DEFAULT ''")
+
+        self.set_meta("schema_version", str(SCHEMA_VERSION))
 
         # Категориите от по-ранна версия стават отраслите от играта.
         for old_name, new_name in (("Храни", "Агрокултура"),
@@ -211,11 +246,11 @@ class Database:
         if timer is None:
             return None
         self.conn.execute(
-            "INSERT INTO history (product, quality, type, quantity, line, "
+            "INSERT INTO history (product, quality, type, quantity, line, world, "
             "start_at, end_at, duration_sec, finished_at, cycle_no, profit, note) "
-            "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+            "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
             (timer.product, timer.quality, timer.type, timer.quantity,
-             timer.line, timer.start_at,
+             timer.line, timer.world, timer.start_at,
              timer.end_at, timer.duration_sec, ts, timer.cycle_no, profit, timer.note),
         )
         self.conn.execute(
@@ -237,6 +272,8 @@ class Database:
         nxt = Timer(
             product=timer.product,
             quality=timer.quality,
+            world=timer.world,
+            building=timer.building,
             type=timer.type,
             quantity=timer.quantity,
             line=timer.line,
@@ -312,6 +349,84 @@ class Database:
         product.default_type = timer.type
         self.upsert_product(product)
 
+    # ---------------- meta ----------------
+
+    def get_meta(self, key: str, default: str = "") -> str:
+        row = self.conn.execute("SELECT value FROM meta WHERE key = ?", (key,)).fetchone()
+        return row["value"] if row else default
+
+    def set_meta(self, key: str, value: str) -> None:
+        self.conn.execute(
+            "INSERT INTO meta (key, value) VALUES (?, ?) "
+            "ON CONFLICT(key) DO UPDATE SET value = excluded.value",
+            (key, value))
+        self.conn.commit()
+
+    # ---------------- компании ----------------
+
+    def get_account(self, world: str, name: str) -> Account | None:
+        row = self.conn.execute(
+            "SELECT * FROM accounts WHERE pylower(world) = pylower(?) "
+            "AND pylower(name) = pylower(?)",
+            (world, name),
+        ).fetchone()
+        return _row_to_account(row) if row else None
+
+    def upsert_account(self, account: Account) -> int:
+        """Записва компанията; ако вече я има, **добавя** сградите към старите."""
+        existing = self.get_account(account.world, account.name)
+        if existing is None:
+            if not account.created_at:
+                account.created_at = time_now()
+            columns = ", ".join(_ACCOUNT_FIELDS)
+            placeholders = ", ".join("?" * len(_ACCOUNT_FIELDS))
+            cur = self.conn.execute(
+                "INSERT INTO accounts (" + columns + ") VALUES (" + placeholders + ")",
+                [getattr(account, f) for f in _ACCOUNT_FIELDS])
+            self.conn.commit()
+            account.id = int(cur.lastrowid)
+            return account.id
+
+        for building in account.building_list:
+            existing.add_building(building)
+        if account.owner.strip():
+            existing.owner = account.owner.strip()
+        if account.note.strip() and account.note.strip() not in existing.note:
+            existing.note = "; ".join(p for p in (existing.note, account.note.strip()) if p)
+        self.update_account(existing)
+        account.id = existing.id
+        return existing.id
+
+    def update_account(self, account: Account) -> None:
+        if account.id is None:
+            raise ValueError("Компанията няма id.")
+        assignments = ", ".join(f + " = ?" for f in _ACCOUNT_FIELDS)
+        self.conn.execute(
+            "UPDATE accounts SET " + assignments + " WHERE id = ?",
+            [getattr(account, f) for f in _ACCOUNT_FIELDS] + [account.id])
+        self.conn.commit()
+
+    def list_accounts(self, world: str | None = None) -> list[Account]:
+        if world is None:
+            rows = self.conn.execute(
+                "SELECT * FROM accounts ORDER BY world, pylower(name)").fetchall()
+        else:
+            rows = self.conn.execute(
+                "SELECT * FROM accounts WHERE pylower(world) = pylower(?) "
+                "ORDER BY pylower(name)", (world,)).fetchall()
+        return [_row_to_account(r) for r in rows]
+
+    def delete_account(self, account_id: int) -> None:
+        self.conn.execute("DELETE FROM accounts WHERE id = ?", (account_id,))
+        self.conn.commit()
+
+    def list_worlds(self) -> list[str]:
+        """Всички светове, в които има компании или таймери."""
+        rows = self.conn.execute(
+            "SELECT world FROM accounts WHERE world != '' "
+            "UNION SELECT world FROM timers WHERE world != ''").fetchall()
+        return sorted({r["world"] for r in rows}, key=str.lower)
+
     # ---------------- история ----------------
 
     def list_history(self, limit: int = 1000) -> list[HistoryEntry]:
@@ -333,6 +448,8 @@ def _row_to_timer(row: sqlite3.Row) -> Timer:
         type=row["type"],
         quantity=float(row["quantity"]),
         line=row["line"],
+        world=row["world"],
+        building=row["building"],
         start_at=float(row["start_at"]),
         end_at=float(row["end_at"]),
         duration_sec=int(row["duration_sec"]),
@@ -350,12 +467,25 @@ def _row_to_timer(row: sqlite3.Row) -> Timer:
     )
 
 
+def _row_to_account(row: sqlite3.Row) -> Account:
+    return Account(
+        id=int(row["id"]),
+        world=row["world"],
+        name=row["name"],
+        owner=row["owner"],
+        buildings=row["buildings"],
+        note=row["note"],
+        created_at=float(row["created_at"] or 0),
+    )
+
+
 def _row_to_product(row: sqlite3.Row) -> Product:
     return Product(
         id=int(row["id"]),
         name=row["name"],
         quality=row["quality"],
         category=row["category"],
+        building=row["building"],
         default_type=row["default_type"],
         default_duration_sec=int(row["default_duration_sec"]),
         default_quantity=float(row["default_quantity"]),
@@ -373,6 +503,7 @@ def _row_to_history(row: sqlite3.Row) -> HistoryEntry:
         type=row["type"],
         quantity=float(row["quantity"]),
         line=row["line"],
+        world=row["world"],
         start_at=float(row["start_at"]),
         end_at=float(row["end_at"]),
         duration_sec=int(row["duration_sec"]),
