@@ -213,6 +213,18 @@ class ImportExportTest(unittest.TestCase):
         self.assertEqual(self.db.get_product("Хляб").research, "Храна")
 
 
+class SummaryTest(unittest.TestCase):
+    def test_wording(self):
+        from kapiland.wxui.catalog_panel import import_lists_summary
+
+        self.assertEqual(import_lists_summary(
+            {"kind": gamedata.RESEARCH, "groups": 1, "products": 1, "added": 0}),
+            "Внесени 1 продукт в 1 наука.")
+        self.assertEqual(import_lists_summary(
+            {"kind": gamedata.PRODUCTION, "groups": 19, "products": 95, "added": 3}),
+            "Внесени 95 продукта в 19 сгради, 3 от тях нови.")
+
+
 class MigrationTest(unittest.TestCase):
     def test_old_database_gets_the_research_column(self):
         path = Path(tempfile.mkdtemp(prefix="kapilands-old")) / "old.db"

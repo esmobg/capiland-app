@@ -273,9 +273,12 @@ class CatalogPanel(wx.Panel):
 
 def import_lists_summary(result: dict) -> str:
     """„Внесени 103 продукта в 7 науки, 5 от тях нови.“ — за екрана и четеца."""
-    where = "науки" if result["kind"] == gamedata.RESEARCH else "сгради"
-    count = result["products"]
-    text = f"Внесени {count} {'продукт' if count == 1 else 'продукта'} в {result['groups']} {where}"
+    count, groups = result["products"], result["groups"]
+    if result["kind"] == gamedata.RESEARCH:
+        where = "наука" if groups == 1 else "науки"
+    else:
+        where = "сграда" if groups == 1 else "сгради"
+    text = f"Внесени {count} {'продукт' if count == 1 else 'продукта'} в {groups} {where}"
     if result["added"]:
         text += f", {result['added']} от тях нови"
     return text + "."
