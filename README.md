@@ -24,7 +24,7 @@ Windows приложение за играта **Kapilands** (bg.kapilands.eu и
 
 От [Releases](https://github.com/esmobg/capiland-app/releases) свали едното:
 
-- **`Kapilands-Taymer-2.0-Setup.exe`** — инсталатор на български. Слага
+- **`Kapilands-Taymer-2.1-Setup.exe`** — инсталатор на български. Слага
   приложението в менюто „Старт“, по желание на работния плот и в автоматично
   стартиране, и се маха от „Приложения“ в Настройки на Windows. Инсталира се
   **само за теб, без прозорец за администратор** — прозорецът на UAC е на
@@ -250,7 +250,13 @@ python tools/nvda_check.py
 Пуска инсталирания NVDA **беззвучно**, с отделни временни настройки, натиска
 клавиши както човек и проверява какво NVDA би изговорил. Докато работи (около
 2 минути), не пиши на клавиатурата. С `--exe dist/Kapilands-Taymer.exe`
-проверява компилирания файл.
+проверява компилирания файл. С `--voice gergana` NVDA говори на глас с
+българския глас „Гергана“ (BACL SpeechLab 2.0) и проверката потвърждава, че
+NVDA го е заредил. „Гергана“ е 32-битов SAPI 5 глас, а NVDA 2026 е 64-битов,
+затова в NVDA се избира синтезатор **„Microsoft Speech API version 5 (32 bit)“**
+(NVDA+Ctrl+S), после гласът „Gergana“ (NVDA+Ctrl+V).
+
+Проверката заменя пуснатия NVDA и в края го спира — пусни го отново след нея.
 
 ```bash
 python tools/lists_check.py --production "%USERPROFILE%\Documents\Производство.txt"
@@ -266,12 +272,17 @@ python tools/lists_check.py --production "%USERPROFILE%\Documents\Произво
 ## Правене на .exe и инсталатор
 
 1. `build_exe.bat` → `dist\Kapilands-Taymer.exe`
-2. `build_installer.bat` → `dist\Kapilands-Taymer-2.0-Setup.exe` (нужен е
+2. `build_installer.bat` → `dist\Kapilands-Taymer-2.1-Setup.exe` (нужен е
    [Inno Setup 6](https://jrsoftware.org/isinfo.php); скриптът е
    `installer\kapilands.iss`)
 
 `python tools/installer_check.py` минава през съветника, проверява имената на
 елементите, инсталира във временна папка, стартира и деинсталира.
+
+`python tools/upgrade_check.py --old път\Kapilands-Taymer-2.0-Setup.exe` инсталира
+старата версия, обновява я с новия инсталатор и сравнява базата преди и след —
+таймери, компании, цени и времена не трябва да се губят. Работи върху копие на
+`%APPDATA%\KapilandsTimer` и накрая проверява, че оригиналът не е пипнат.
 
 ---
 
@@ -293,7 +304,7 @@ kapiland/
   wxui/                   интерфейсът
 vendor/nvda/              NVDA Controller Client (LGPL-2.1)
 installer/                скрипт за инсталатора (Inno Setup)
-tools/                    UIA одит, проверка с NVDA, на инсталатора и на списъците
+tools/                    UIA одит, проверка с NVDA, на инсталатора, обновяването и списъците
 tests/                    311 теста
 docs/ACCESSIBILITY.md     достъпност по WCAG 2.1 AA
 ```
