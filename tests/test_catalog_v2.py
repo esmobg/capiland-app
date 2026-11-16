@@ -30,8 +30,9 @@ class WorldTest(unittest.TestCase):
 
 
 class BuildingTest(unittest.TestCase):
-    def test_all_fifteen_buildings_from_the_notes(self):
-        self.assertEqual(len(catalog.BUILDINGS), 15)
+    def test_buildings_from_the_notes_and_the_production_list(self):
+        # 15 от бележките + 11 от списъка „Производство“.
+        self.assertEqual(len(catalog.BUILDINGS), 26)
         for name in catalog.building_names():
             self.assertEqual(catalog.find_building(name), name)
 

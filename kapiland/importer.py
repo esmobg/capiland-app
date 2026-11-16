@@ -458,7 +458,8 @@ class _Parser:
                     and account is None and self.section is None:
                 continue
 
-            building = info["building"] or self._pick_building(account, info["products"])
+            building = info["building"] or self._pick_building(
+                account, info["products"], info["type"])
             if building and account is not None and info["type"] in (BUILD, EXPAND):
                 account.add_building(building)
             for product in info["products"] or [""]:
@@ -521,18 +522,21 @@ class _Parser:
         return {"type": kind, "products": products, "quantity": quantity, "building": building}
 
     @staticmethod
-    def _pick_building(account: ImportAccount | None, products: list[str]) -> str:
+    def _pick_building(account: ImportAccount | None, products: list[str],
+                       kind: str = PRODUCTION) -> str:
         """Сграда само от сградите, изброени за компанията — без гадаене.
 
         Каталогът знае, че компютрите се правят във „Фабрики за електроника“,
-        но „Ипсилон продава компютри“ е в магазин. Затова връзката от каталога се
-        ползва само за избор между сградите, които компанията вече има.
+        но „Ипсилон продава компютри“ е в магазин. Затова връзките от каталога се
+        ползват само за избор между сградите, които компанията вече има — при
+        продажба първо магазинът, иначе първо фабриката.
         """
         if account is None or not account.buildings:
             return ""
-        mapped = catalog.building_for_product(products[0]) if products else ""
-        if mapped and mapped in account.buildings:
-            return mapped
+        candidates = catalog.buildings_for_product(products[0], kind) if products else []
+        for candidate in candidates:
+            if candidate in account.buildings:
+                return candidate
         return account.buildings[-1]
 
     # ------------------------------------------------------------- край

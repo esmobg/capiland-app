@@ -42,7 +42,7 @@ class TimerDialog(wx.Dialog):
         self.company = form.add("Компания:", wx.ComboBox, choices=[])
         self.kind = form.add("Дейност:", wx.Choice, choices=[TYPE_LABELS[t] for t in TYPE_ORDER])
         self.building = form.add("Сграда:", wx.ComboBox, choices=catalog.building_names())
-        products = list(dict.fromkeys(catalog.product_names_v2() + [p.name for p in db.list_products()]))
+        products = list(dict.fromkeys(catalog.known_product_names() + [p.name for p in db.list_products()]))
         self.product = form.add("Продукт:", wx.ComboBox, choices=sorted(products, key=str.lower))
         qualities = sorted({p.quality for p in db.list_products() if p.quality.strip()})
         self.quality = form.add("Качество:", wx.ComboBox, choices=qualities)

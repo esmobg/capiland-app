@@ -13,6 +13,7 @@ import re
 from pathlib import Path
 from typing import Iterable
 
+from . import gamedata
 from .db import Database
 from .models import Product, TimerType
 
@@ -91,6 +92,18 @@ BUILDINGS: tuple[tuple[str, str], ...] = (
     ("Аптека", "Химия"),
     ("Автосалон", "Автомобили"),
     ("Бижутерия", "Бижута"),
+    # От списъка „Производство“ на играча:
+    ("Сладоледена фабрика", "Агрокултура"),
+    ("Фабрика за бижута", "Бижута"),
+    ("Фабрика за играчки", "Друго"),
+    ("Фабрика за мебели", "Мебели"),
+    ("Фабрика за напитки", "Агрокултура"),
+    ("Фабрика за коли", "Автомобили"),
+    ("Месарница", "Животновъдство"),
+    ("Фабрика", "Строителни"),
+    ("Кладенец", "Суровини"),
+    ("ТВ станция", "Друго"),
+    ("Електроцентрала", "Енергия"),
 )
 _BUILDING_ALIASES: dict[str, str] = {
     "фабрика за електроника": "Фабрики за електроника",
@@ -108,6 +121,37 @@ _BUILDING_ALIASES: dict[str, str] = {
     "аптеки": "Аптека",
     "автосалони": "Автосалон",
     "бижутерии": "Бижутерия",
+    "химическа": "Химически фабрики",
+    "сладоледени фабрики": "Сладоледена фабрика",
+    "фабрики за бижута": "Фабрика за бижута",
+    "фабрики за играчки": "Фабрика за играчки",
+    "фабрики за мебели": "Фабрика за мебели",
+    "мебелна фабрика": "Фабрика за мебели",
+    "мебелни фабрики": "Фабрика за мебели",
+    "фабрики за напитки": "Фабрика за напитки",
+    "фабрики за коли": "Фабрика за коли",
+    "автомобилна фабрика": "Фабрика за коли",
+    "автомобилни фабрики": "Фабрика за коли",
+    "месарници": "Месарница",
+    "фабрики": "Фабрика",
+    "кладенци": "Кладенец",
+    "тиви станция": "ТВ станция",
+    "тиви станции": "ТВ станция",
+    "тв станции": "ТВ станция",
+    "телевизионна станция": "ТВ станция",
+    "елцентрала": "Електроцентрала",
+    "елцентрали": "Електроцентрала",
+    "електроцентрали": "Електроцентрала",
+}
+
+# Отрасъл по наука — за продукт, чиято сграда не е известна.
+_CATEGORY_BY_RESEARCH: dict[str, str] = {
+    "Химическа": "Химия",
+    "Храна": "Агрокултура",
+    "Техническа": "Високи технологии",
+    "Добитък и плантация": "Агрокултура",
+    "Мини и кладенец": "Суровини",
+    "Медийна": "Друго",
 }
 
 # ----------------------------------------------------------------- продукти
@@ -175,12 +219,23 @@ def product_names_v2() -> list[str]:
     return [name for name, _c, _b in PRODUCTS_V2]
 
 
+def known_product_names() -> list[str]:
+    """Продуктите, които приложението знае само: от бележките и от двата списъка."""
+    names: dict[str, str] = {}
+    for name in list(product_names_v2()) + list(gamedata.all_product_names()):
+        names.setdefault(name.lower(), name)
+    return list(names.values())
+
+
 def find_product(text: str, extra: Iterable[str] = ()) -> str | None:
     """Разпознава продукт, включително членуван: ``Токът`` → ``Ток``."""
     wanted = _norm(text)
     if not wanted:
         return None
-    names = list(dict.fromkeys(list(product_names_v2()) + list(extra)))
+    alias = gamedata.PRODUCT_ALIASES.get(wanted)
+    if alias:
+        return alias
+    names = list(dict.fromkeys(known_product_names() + list(extra)))
     by_key = {_norm(name): name for name in names}
     if wanted in by_key:
         return by_key[wanted]
@@ -200,6 +255,37 @@ def building_for_product(product: str) -> str:
         if name.lower() == (product or "").lower():
             return building
     return ""
+
+
+def production_building(product: str) -> str:
+    """Сградата, в която се произвежда продуктът според списъка „Производство“."""
+    group = gamedata.production_group_for_product(product)
+    if not group:
+        return ""
+    return find_building(group) or group
+
+
+def buildings_for_product(product: str, kind: str = TimerType.PRODUCTION.value) -> list[str]:
+    """Известните сгради за продукта — първо тази, която отговаря на дейността.
+
+    При продажба първо е сградата от бележките (магазинът), иначе — фабриката.
+    """
+    made = production_building(product)
+    noted = building_for_product(product)
+    order = [noted, made] if kind == TimerType.SALE.value else [made, noted]
+    return [b for b in dict.fromkeys(order) if b]
+
+
+def category_for_product(product: str) -> str:
+    """Отрасъл: от бележките, после от сградата, после от науката."""
+    for name, category, _b in PRODUCTS_V2:
+        if name.lower() == (product or "").lower():
+            return category
+    building = production_building(product)
+    for name, category in BUILDINGS:
+        if name == building:
+            return category
+    return _CATEGORY_BY_RESEARCH.get(gamedata.research_for_product(product), "")
 
 
 def upgrade_catalog_v2(db: Database) -> int:
@@ -229,6 +315,141 @@ def upgrade_catalog_v2(db: Database) -> int:
             db.upsert_product(product)
     db.set_meta("catalog_v2", "1")
     return added
+
+
+def _products_by_name(db: Database) -> dict[str, list[Product]]:
+    found: dict[str, list[Product]] = {}
+    for product in db.list_products():
+        found.setdefault(product.name.lower(), []).append(product)
+    return found
+
+
+def upgrade_catalog_v3(db: Database) -> int:
+    """Еднократно добавя продуктите от списъците „Изследвания“ и „Производство“.
+
+    Като v2: нищо попълнено не се презаписва — на съществуващ продукт (във
+    всяко качество) се попълват само празните категория, сграда и наука.
+    """
+    if db.get_meta("catalog_v3") == "1":
+        return 0
+    existing = _products_by_name(db)
+    added = 0
+    for name in gamedata.all_product_names():
+        values = {
+            "category": category_for_product(name),
+            "building": production_building(name),
+            "research": gamedata.research_for_product(name),
+        }
+        found = existing.get(name.lower())
+        if not found:
+            db.upsert_product(Product(name=name, default_type=TimerType.PRODUCTION.value,
+                                      **values))
+            added += 1
+            continue
+        for product in found:
+            changed = False
+            for field_name, value in values.items():
+                if value and not getattr(product, field_name).strip():
+                    setattr(product, field_name, value)
+                    changed = True
+            if changed:
+                db.upsert_product(product)
+    db.set_meta("catalog_v3", "1")
+    return added
+
+
+# ------------------------------------------------- списъци в текстов вид
+
+def _read_text(path: str | Path) -> str:
+    raw = Path(path).read_bytes()
+    try:
+        return raw.decode("utf-8-sig")
+    except UnicodeDecodeError:
+        return raw.decode("cp1251")  # стар Бележник на Windows
+
+
+def _kind_from_name(path: str | Path) -> str | None:
+    stem = Path(path).stem.lower()
+    if "изследв" in stem or "наук" in stem or "research" in stem:
+        return gamedata.RESEARCH
+    if "производ" in stem or "production" in stem:
+        return gamedata.PRODUCTION
+    return None
+
+
+def import_lists(db: Database, path: str | Path) -> dict:
+    """Внася списък „Изследвания“ или „Производство“ от текстов файл.
+
+    Видът се познава по заглавния ред, а ако го няма — по името на файла.
+    Потребителят изрично дава файла, затова науката или сградата на изброените
+    продукти се **презаписва**; времена, количества и цени не се пипат.
+    Връща {"kind", "groups", "products", "added"}.
+    """
+    kind, groups = gamedata.parse_groups(_read_text(path))
+    if kind is None:
+        kind = _kind_from_name(path)
+    if kind is None:
+        raise ValueError(
+            "не е ясно дали е списък с изследвания или с производство. Първият ред "
+            f"трябва да е „{gamedata.HEADERS[gamedata.RESEARCH]}“ или "
+            f"„{gamedata.HEADERS[gamedata.PRODUCTION]}“.")
+    field_name = "research" if kind == gamedata.RESEARCH else "building"
+
+    existing = _products_by_name(db)
+    seen: set[str] = set()
+    added = 0
+    for group, products in groups.items():
+        value = group if kind == gamedata.RESEARCH else (find_building(group) or group)
+        for name in products:
+            seen.add(name.lower())
+            found = existing.get(name.lower())
+            if not found:
+                product = Product(name=name, category=category_for_product(name),
+                                  default_type=TimerType.PRODUCTION.value)
+                setattr(product, field_name, value)
+                db.upsert_product(product)
+                existing[name.lower()] = [product]
+                added += 1
+                continue
+            for product in found:
+                setattr(product, field_name, value)
+                if not product.category.strip():
+                    product.category = category_for_product(name)
+                db.upsert_product(product)
+    return {"kind": kind, "groups": len(groups), "products": len(seen), "added": added}
+
+
+def list_groups(db: Database, kind: str) -> dict[str, list[str]]:
+    """Каталогът, подреден в групи по наука или по сграда."""
+    field_name = "research" if kind == gamedata.RESEARCH else "building"
+    groups: dict[str, list[str]] = {}
+    if kind == gamedata.RESEARCH:
+        for branch in gamedata.RESEARCH_BRANCHES:
+            groups[branch] = []
+    for product in db.list_products():
+        group = getattr(product, field_name).strip()
+        if not group:
+            continue
+        key = next((g for g in groups if g.lower() == group.lower()), group)
+        names = groups.setdefault(key, [])
+        if product.name.lower() not in (n.lower() for n in names):
+            names.append(product.name)
+    return groups
+
+
+def export_lists(db: Database, folder: str | Path) -> dict[str, int]:
+    """Записва ``Изследвания.txt`` и ``Производство.txt`` в същия формат.
+
+    Връща броя продукти във всеки файл: {"research": …, "production": …}.
+    """
+    folder = Path(folder)
+    counts: dict[str, int] = {}
+    for kind in (gamedata.RESEARCH, gamedata.PRODUCTION):
+        groups = list_groups(db, kind)
+        text = gamedata.format_groups(kind, groups)
+        (folder / gamedata.FILE_NAMES[kind]).write_text(text, encoding="utf-8-sig")
+        counts[kind] = sum(len(p) for p in groups.values())
+    return counts
 
 # Начални имена за удобство — всички полета се редактират от раздела „Каталог“.
 SEED_PRODUCTS: tuple[tuple[str, str], ...] = (
@@ -267,8 +488,8 @@ SEED_PRODUCTS: tuple[tuple[str, str], ...] = (
 _SEED_FLAG = "__seeded__"
 
 CSV_COLUMNS = (
-    "name", "quality", "category", "building", "default_type", "default_duration_sec",
-    "default_quantity", "unit_cost", "unit_price", "note",
+    "name", "quality", "category", "building", "research", "default_type",
+    "default_duration_sec", "default_quantity", "unit_cost", "unit_price", "note",
 )
 
 
@@ -321,6 +542,7 @@ def import_csv(db: Database, path: str | Path) -> int:
             product.quality = quality
             product.category = (row.get("category") or product.category).strip()
             product.building = (row.get("building") or product.building).strip()
+            product.research = (row.get("research") or product.research).strip()
             product.default_type = (row.get("default_type")
                                     or product.default_type).strip()
             product.default_duration_sec = _as_int(
