@@ -339,6 +339,7 @@ def create_app(db_path: str | None = None) -> tuple[wx.App, MainFrame]:
     db = Database(db_path)
     catalog.ensure_seed(db)
     catalog.upgrade_catalog_v2(db)
+    catalog.upgrade_catalog_v3(db)
     frame = MainFrame(db, settings)
     return app, frame
 

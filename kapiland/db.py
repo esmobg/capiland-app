@@ -16,6 +16,7 @@ CREATE TABLE IF NOT EXISTS products (
     quality              TEXT    NOT NULL DEFAULT '',
     category             TEXT    NOT NULL DEFAULT '',
     building             TEXT    NOT NULL DEFAULT '',
+    research             TEXT    NOT NULL DEFAULT '',
     default_type         TEXT    NOT NULL DEFAULT 'production',
     default_duration_sec INTEGER NOT NULL DEFAULT 0,
     default_quantity     REAL    NOT NULL DEFAULT 0,
@@ -97,10 +98,10 @@ _TIMER_FIELDS = (
 )
 _ACCOUNT_FIELDS = ("world", "name", "owner", "buildings", "note", "created_at")
 
-SCHEMA_VERSION = 2
+SCHEMA_VERSION = 3
 
 _PRODUCT_FIELDS = (
-    "name", "quality", "category", "building", "default_type", "default_duration_sec",
+    "name", "quality", "category", "building", "research", "default_type", "default_duration_sec",
     "default_quantity", "unit_cost", "unit_price", "note",
 )
 
@@ -155,6 +156,9 @@ class Database:
         if "building" not in columns:
             self.conn.execute(
                 "ALTER TABLE products ADD COLUMN building TEXT NOT NULL DEFAULT ''")
+        if "research" not in columns:
+            self.conn.execute(
+                "ALTER TABLE products ADD COLUMN research TEXT NOT NULL DEFAULT ''")
 
         self.set_meta("schema_version", str(SCHEMA_VERSION))
 
@@ -486,6 +490,7 @@ def _row_to_product(row: sqlite3.Row) -> Product:
         quality=row["quality"],
         category=row["category"],
         building=row["building"],
+        research=row["research"],
         default_type=row["default_type"],
         default_duration_sec=int(row["default_duration_sec"]),
         default_quantity=float(row["default_quantity"]),

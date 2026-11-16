@@ -53,6 +53,7 @@ def make_frame():
     os.environ["KAPILANDS_DATA_DIR"] = tempfile.mkdtemp(prefix="kapilands-wx")
     db = Database(os.path.join(os.environ["KAPILANDS_DATA_DIR"], "t.db"))
     catalog.upgrade_catalog_v2(db)
+    catalog.upgrade_catalog_v3(db)
     settings = Settings()
     settings.set("toast_enabled", False)
     settings.set("sound_enabled", False)

@@ -171,6 +171,7 @@ class Product:
     quality: str = ""          # едно име в различно качество = различен запис
     category: str = ""
     building: str = ""         # в коя сграда се прави или продава
+    research: str = ""         # в коя наука се изследва: „Химическа“…
     default_type: str = TimerType.PRODUCTION.value
     default_duration_sec: int = 0
     default_quantity: float = 0.0

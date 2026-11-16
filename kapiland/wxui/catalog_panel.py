@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import wx
 
-from .. import catalog, planner
+from .. import catalog, gamedata, planner
 from ..models import TYPE_LABELS, TYPE_ORDER, Product, type_label
 from ..timeutil import format_duration, parse_duration
 from .common import Form, RowList, confirm, message, read_only_text, show_error
@@ -14,6 +14,7 @@ COLUMNS = [
     ("Качество", 80, wx.LIST_FORMAT_LEFT),
     ("Категория", 130, wx.LIST_FORMAT_LEFT),
     ("Сграда", 180, wx.LIST_FORMAT_LEFT),
+    ("Наука", 140, wx.LIST_FORMAT_LEFT),
     ("Времетраене", 100, wx.LIST_FORMAT_RIGHT),
     ("Цена", 80, wx.LIST_FORMAT_RIGHT),
     ("Печалба на час", 120, wx.LIST_FORMAT_RIGHT),
@@ -48,6 +49,7 @@ class ProductDialog(wx.Dialog):
         self.quality = form.add("Качество:", wx.TextCtrl)
         self.category = form.add("Категория:", wx.ComboBox, choices=list(catalog.CATEGORIES))
         self.building = form.add("Сграда:", wx.ComboBox, choices=catalog.building_names())
+        self.research = form.add("Наука:", wx.ComboBox, choices=list(gamedata.RESEARCH_BRANCHES))
         self.kind = form.add("Дейност по подразбиране:", wx.Choice,
                              choices=[TYPE_LABELS[t] for t in TYPE_ORDER])
         self.duration = form.add("Времетраене (напр. 2ч 30м):", wx.TextCtrl)
@@ -70,6 +72,7 @@ class ProductDialog(wx.Dialog):
         self.quality.SetValue(p.quality)
         self.category.SetValue(p.category)
         self.building.SetValue(p.building)
+        self.research.SetValue(p.research)
         self.kind.SetSelection(TYPE_ORDER.index(p.default_type) if p.default_type in TYPE_ORDER else 0)
         self.duration.SetValue(format_duration(p.default_duration_sec) if p.default_duration_sec else "")
         self.quantity.SetValue(_num(p.default_quantity))
@@ -106,6 +109,7 @@ class ProductDialog(wx.Dialog):
         product.quality = self.quality.GetValue().strip()
         product.category = self.category.GetValue().strip()
         product.building = self.building.GetValue().strip()
+        product.research = self.research.GetValue().strip()
         product.default_type = TYPE_ORDER[max(0, self.kind.GetSelection())]
         product.default_duration_sec = duration
         product.default_quantity = numbers["quantity"]
@@ -133,7 +137,9 @@ class CatalogPanel(wx.Panel):
         buttons = wx.WrapSizer(wx.HORIZONTAL)
         for label, handler in (("&Нов продукт", self.new_product), ("&Редактирай", self.edit_selected),
                                ("Изтрий", self.delete_selected), ("Изнеси в CSV", self.export_csv),
-                               ("Внеси от CSV", self.import_csv)):
+                               ("Внеси от CSV", self.import_csv),
+                               ("Внеси списък (TXT)", self.import_lists),
+                               ("Изнеси списъци (TXT)", self.export_lists)):
             button = wx.Button(self, label=label)
             button.Bind(wx.EVT_BUTTON, lambda _e, h=handler: h())
             buttons.Add(button, 0, wx.ALL, 4)
@@ -149,6 +155,7 @@ class CatalogPanel(wx.Panel):
         for p in products:
             money = planner.profit(p.default_quantity, p.unit_cost, p.unit_price, p.default_duration_sec)
             rows.append((p.id, [p.name, p.quality or "—", p.category or "—", p.building or "—",
+                                p.research or "—",
                                 format_duration(p.default_duration_sec) if p.default_duration_sec else "—",
                                 _num(p.unit_price) or "—",
                                 planner.format_money(money.per_hour) if money.per_hour else "—"],
@@ -232,3 +239,43 @@ class CatalogPanel(wx.Panel):
             return
         self.refresh()
         self.frame.announce(f"Внесени {count} продукта.")
+
+    def import_lists(self) -> None:
+        with wx.FileDialog(self.frame, "Внасяне на списък с изследвания или производство",
+                           wildcard="Текстов файл (*.txt)|*.txt",
+                           style=wx.FD_OPEN | wx.FD_FILE_MUST_EXIST) as dialog:
+            if dialog.ShowModal() != wx.ID_OK:
+                return
+            path = dialog.GetPath()
+        try:
+            result = catalog.import_lists(self.db, path)
+        except (OSError, ValueError) as exc:
+            message(self.frame, f"Не можах да внеса списъка: {exc}", "Грешка", wx.ICON_ERROR)
+            return
+        self.refresh()
+        self.frame.announce(import_lists_summary(result))
+
+    def export_lists(self) -> None:
+        with wx.DirDialog(self.frame, "Папка за Изследвания.txt и Производство.txt",
+                          style=wx.DD_DEFAULT_STYLE) as dialog:
+            if dialog.ShowModal() != wx.ID_OK:
+                return
+            folder = dialog.GetPath()
+        try:
+            counts = catalog.export_lists(self.db, folder)
+        except OSError as exc:
+            message(self.frame, f"Не можах да запиша файловете: {exc}", "Грешка", wx.ICON_ERROR)
+            return
+        self.frame.announce(
+            f"Изнесени: {counts[gamedata.RESEARCH]} продукта в Изследвания.txt и "
+            f"{counts[gamedata.PRODUCTION]} в Производство.txt.")
+
+
+def import_lists_summary(result: dict) -> str:
+    """„Внесени 103 продукта в 7 науки, 5 от тях нови.“ — за екрана и четеца."""
+    where = "науки" if result["kind"] == gamedata.RESEARCH else "сгради"
+    count = result["products"]
+    text = f"Внесени {count} {'продукт' if count == 1 else 'продукта'} в {result['groups']} {where}"
+    if result["added"]:
+        text += f", {result['added']} от тях нови"
+    return text + "."
