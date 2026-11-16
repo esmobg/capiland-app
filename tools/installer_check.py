@@ -6,7 +6,7 @@ UI Automation, че бутоните, отметките и полетата и�
 временни данни, деинсталира тихо и проверява, че не остава нищо — нито
 файлове, нито запис в „Приложения“.
 
-Употреба:  python tools/installer_check.py [dist\\Kapilands-Taymer-2.0-Setup.exe]
+Употреба:  python tools/installer_check.py [dist\\Kapilands-Taymer-2.1-Setup.exe]
 """
 
 from __future__ import annotations
@@ -70,7 +70,7 @@ def audit(window) -> tuple[list[str], list[str]]:
 
 
 def main() -> int:
-    setup = Path(sys.argv[1] if len(sys.argv) > 1 else ROOT / "dist" / "Kapilands-Taymer-2.0-Setup.exe").resolve()
+    setup = Path(sys.argv[1] if len(sys.argv) > 1 else ROOT / "dist" / "Kapilands-Taymer-2.1-Setup.exe").resolve()
     if registry_entry():
         print("Приложението вече е инсталирано — проверката спира, за да не го развали.")
         return 2
@@ -120,7 +120,7 @@ def main() -> int:
         problems.append("няма инсталиран Kapilands-Taymer.exe")
     entry = registry_entry()
     print("Запис в „Приложения“:", entry)
-    if not entry or entry.get("DisplayVersion") != "2.0":
+    if not entry or entry.get("DisplayVersion") != "2.1":
         problems.append("липсва или е грешен записът за деинсталиране")
 
     if exe.exists():

@@ -9,10 +9,14 @@
    там NVDA записва всичко, което би изговорил („Speaking [...]“).
 3. Пуска приложението с временна база и натиска клавиши както човек:
    списък, F3, F4, Ctrl+N, Ctrl+I, Ctrl+2, изчаква таймер да стане готов,
-   после Ctrl+Alt+K **от друг прозорец**.
+   после Ctrl+Alt+K **от друг прозорец**, накрая Ctrl+3 (Каталог) и Enter
+   върху продукт — колоната и полето „Наука“.
 4. Спира NVDA и приложението и проверява лога.
 
 Употреба:  python tools/nvda_check.py [--report отчет.txt]
+           python tools/nvda_check.py --voice gergana
+              — със звук, през българския глас „Гергана“ (BACL SpeechLab 2.0,
+                32-битов SAPI 5) и проверка, че NVDA го е заредил.
 Докато работи (~2 минути), не пиши на клавиатурата.
 """
 
@@ -55,6 +59,23 @@ NVDA_INI = """[general]
 [presentation]
 \treportNotifications = True
 """
+# Гласове за --voice: (синтезатор на NVDA, Id на гласа в SAPI).
+VOICES = {
+    "gergana": ("sapi5_32",
+                r"HKEY_LOCAL_MACHINE\SOFTWARE\Microsoft\Speech\Voices\Tokens\Gergana"),
+}
+
+
+def nvda_ini(voice: str = "") -> str:
+    """Настройките за проверката — беззвучно или с избрания глас."""
+    if not voice:
+        return NVDA_INI
+    synth, token = VOICES[voice]
+    return NVDA_INI.replace(
+        "\tsynth = silence\n",
+        f"\tsynth = {synth}\n\t[[{synth}]]\n\t\tvoice = {token}\n")
+
+
 HELPER = r"""
 import tkinter as tk
 root = tk.Tk()
@@ -123,13 +144,15 @@ def main() -> int:
     parser = argparse.ArgumentParser()
     parser.add_argument("--report", default="")
     parser.add_argument("--exe", default="", help="проверка на компилирания .exe")
+    parser.add_argument("--voice", default="", choices=["", *VOICES],
+                        help="със звук през този глас вместо беззвучно")
     args = parser.parse_args()
 
     nvda = find_nvda()
     work = Path(tempfile.mkdtemp(prefix="kapilands-nvda"))
     config_dir = work / "nvda-config"
     config_dir.mkdir()
-    (config_dir / "nvda.ini").write_text(NVDA_INI, encoding="utf-8")
+    (config_dir / "nvda.ini").write_text(nvda_ini(args.voice), encoding="utf-8")
     log_path = work / "nvda.log"
     data_dir = work / "app"
     data_dir.mkdir()
@@ -140,7 +163,7 @@ def main() -> int:
     app = helper = None
     controller = NvdaBackend()
 
-    print("Пускам NVDA беззвучно…")
+    print(f"Пускам NVDA с глас {args.voice}…" if args.voice else "Пускам NVDA беззвучно…")
     # Инсталираният NVDA е с uiAccess: CreateProcess връща грешка 740, затова
     # се пуска през обвивката на Windows (ShellExecute), както при двоен клик.
     start_nvda(nvda, f'-c "{config_dir}" --log-file="{log_path}" '
@@ -202,6 +225,20 @@ def main() -> int:
             time.sleep(2)
         press("{Ctrl}{Alt}k", 4)
         mark("end")
+
+        # Каталог: колона „Наука“ в реда и полето „Наука:“ в диалога (v2.1).
+        window.SetActive()
+        time.sleep(2)
+        mark("catalog")
+        press("{Ctrl}3", 3)
+        press("{Down}")
+        press("{Up}")
+        mark("product")
+        press("{Enter}", 3)
+        for _ in range(4):  # Име → Качество → Категория → Сграда → Наука
+            press("{Tab}", 1.5)
+        press("{Esc}", 2)
+        mark("catalog_end")
     finally:
         for proc in (helper,):
             if proc is not None and proc.poll() is None:
@@ -234,6 +271,9 @@ def main() -> int:
         ("Ctrl+2 — раздел Компании", "accounts", "ready", ["Компании"]),
         ("Готово — изговорено само", "ready", "hotkey", ["Готово", "Бензин"]),
         ("Ctrl+Alt+K от друг прозорец", "hotkey", "end", ["Готово", "Следващо"]),
+        ("Ctrl+3 — Каталог, редът казва и науката", "catalog", "product", ["Продукти", "Наука:"]),
+        ("Enter — продукт, полето „Наука:“", "product", "catalog_end",
+         ["Редактиране на продукт", "Наука:"]),
     ]
     report = [f"NVDA: {nvda}", f"Лог: {log_path}", ""]
     f3_parts = phrases[marks.get("f3", 0):marks.get("f4", 0)]
@@ -245,6 +285,16 @@ def main() -> int:
         failed += 0 if ok else 1
         report.append(f"[{'OK' if ok else 'ЛИПСВА'}] {label}")
         report.append(f"      чу: {heard[:400] or '(нищо)'}")
+    if args.voice:
+        synth, _token = VOICES[args.voice]
+        log = log_path.read_text(encoding="utf-8", errors="replace") if log_path.exists() else ""
+        loaded = f"Loaded synthDriver {synth}" in log
+        failed += 0 if loaded else 1
+        report.append(f"[{'OK' if loaded else 'НЕ СЕ ЗАРЕДИ'}] NVDA зареди синтезатора {synth} "
+                      f"(глас {args.voice})")
+        for line in log.splitlines():
+            if "synthDriver" in line or ("sapi5" in line.lower() and "ERROR" in line):
+                report.append(f"      лог: {line.strip()[:200]}")
     once = f3_repeats == 1
     failed += 0 if once else 1
     report.append(f"[{'OK' if once else 'ПОВТАРЯ СЕ'}] F3 се чува точно веднъж (чу се {f3_repeats} пъти)")

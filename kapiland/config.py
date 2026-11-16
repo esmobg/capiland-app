@@ -8,7 +8,7 @@ from pathlib import Path
 
 APP_NAME = "KapilandsTimer"
 APP_TITLE = "Kapilands Таймер"
-APP_VERSION = "2.0.0"
+APP_VERSION = "2.1.0"
 
 
 def data_dir() -> Path:

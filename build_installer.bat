@@ -1,7 +1,7 @@
 @echo off
 chcp 65001 >nul
 rem ===================================================================
-rem  Прави инсталатора dist\Kapilands-Taymer-2.0-Setup.exe
+rem  Прави инсталатора dist\Kapilands-Taymer-2.1-Setup.exe
 rem  Нужни са: готов dist\Kapilands-Taymer.exe (build_exe.bat) и Inno Setup 6.
 rem ===================================================================
 setlocal
@@ -23,7 +23,7 @@ if not exist "%ISCC%" (
 if errorlevel 1 goto :error
 
 echo.
-echo ГОТОВО: "%cd%\dist\Kapilands-Taymer-2.0-Setup.exe"
+echo ГОТОВО: "%cd%\dist\Kapilands-Taymer-2.1-Setup.exe"
 echo.
 pause
 exit /b 0
