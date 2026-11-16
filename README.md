@@ -279,6 +279,11 @@ python tools/lists_check.py --production "%USERPROFILE%\Documents\Произво
 `python tools/installer_check.py` минава през съветника, проверява имената на
 елементите, инсталира във временна папка, стартира и деинсталира.
 
+`python tools/upgrade_check.py --old път\Kapilands-Taymer-2.0-Setup.exe` инсталира
+старата версия, обновява я с новия инсталатор и сравнява базата преди и след —
+таймери, компании, цени и времена не трябва да се губят. Работи върху копие на
+`%APPDATA%\KapilandsTimer` и накрая проверява, че оригиналът не е пипнат.
+
 ---
 
 ## Структура
@@ -299,7 +304,7 @@ kapiland/
   wxui/                   интерфейсът
 vendor/nvda/              NVDA Controller Client (LGPL-2.1)
 installer/                скрипт за инсталатора (Inno Setup)
-tools/                    UIA одит, проверка с NVDA, на инсталатора и на списъците
+tools/                    UIA одит, проверка с NVDA, на инсталатора, обновяването и списъците
 tests/                    311 теста
 docs/ACCESSIBILITY.md     достъпност по WCAG 2.1 AA
 ```
