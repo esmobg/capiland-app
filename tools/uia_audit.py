@@ -113,6 +113,30 @@ def wait_window(name_part, timeout=15, class_name=None):
     return None
 
 
+class NotInFront(RuntimeError):
+    """Отпред е чужд прозорец — клавишите не се пращат, за да не отидат в него."""
+
+
+def in_front(pid: int) -> bool:
+    try:
+        return auto.GetForegroundControl().ProcessId == pid
+    except Exception:
+        return False
+
+
+def press(pid: int, window, keys: str, wait: float = 0.8) -> None:
+    """Праща клавиши само ако отпред е прозорец на проверяваното приложение."""
+    if not in_front(pid):
+        try:
+            window.SetActive()
+        except Exception:
+            pass
+        time.sleep(0.4)
+    if not in_front(pid):
+        raise NotInFront(keys)
+    auto.SendKeys(keys, waitTime=wait)
+
+
 def main() -> int:
     parser = argparse.ArgumentParser()
     parser.add_argument("--json", default="")
@@ -137,8 +161,7 @@ def main() -> int:
         for keys, label, title in (("{Ctrl}n", "Диалог „Нов таймер“", "Нов таймер"),
                                    ("{Ctrl}i", "Диалог „Внос на списък“", "Внос на списък"),
                                    ("{F1}", "Помощ", "Клавишни комбинации")):
-            main_window.SetActive()
-            auto.SendKeys(keys, waitTime=0.8)
+            press(proc.pid, main_window, keys)
             dialog = main_window.WindowControl(searchDepth=1, Name=title)
             if not dialog.Exists(8, 0.3):
                 dialog = wait_window(title, timeout=5)
@@ -148,24 +171,67 @@ def main() -> int:
                 continue
             time.sleep(0.8)
             reports.append(audit_window(dialog, label))
-            auto.SendKeys("{Esc}", waitTime=0.8)
+            press(proc.pid, dialog, "{Esc}")
             closed = not dialog.Exists(3, 0.3)
             if not closed:
                 reports[-1]["problems"].append({"role": "Window", "name": title,
                                                 "class": "Esc не затвори диалога"})
 
+        # Диалозите, които се отварят с бутон от раздела си.
+        page_dialogs = {"Компании": ("Нова компания", "Нова компания"),
+                        "Каталог": ("Нов продукт", "Нов продукт")}
         for index, page in enumerate(("Компании", "Каталог", "История", "Настройки"), start=2):
-            main_window.SetActive()
-            auto.SendKeys("{Ctrl}%d" % index, waitTime=1.0)
+            press(proc.pid, main_window, "{Ctrl}%d" % index, 1.0)
             reports.append(audit_window(main_window, f"Главен прозорец — {page}"))
+            if page not in page_dialogs:
+                continue
+            button_name, title = page_dialogs[page]
+            label = f"Диалог „{title}“"
+            button = main_window.ButtonControl(searchDepth=6, Name=button_name)
+            if not button.Exists(3, 0.3):
+                reports.append({"window": label, "elements": [], "problems": [
+                    {"role": "Button", "name": button_name, "class": "няма такъв бутон"}],
+                    "named_count": 0})
+                continue
+            button.SetFocus()
+            press(proc.pid, main_window, "{Enter}")   # с клавиатурата, както го прави човек
+            dialog = main_window.WindowControl(searchDepth=1, Name=title)
+            if not dialog.Exists(8, 0.3):
+                reports.append({"window": label, "elements": [], "problems": [
+                    {"role": "Window", "name": "", "class": "не се отвори"}], "named_count": 0})
+                continue
+            time.sleep(0.8)
+            reports.append(audit_window(dialog, label))
+            press(proc.pid, dialog, "{Esc}")
+            if dialog.Exists(3, 0.3):
+                reports[-1]["problems"].append({"role": "Window", "name": title,
+                                                "class": "Esc не затвори диалога"})
+
+        # Меню „Файл“: командите се виждат едва когато менюто е отворено.
+        main_window.SetActive()
+        file_menu = main_window.MenuItemControl(searchDepth=3, Name="Файл")
+        if file_menu.Exists(3, 0.2):
+            file_menu.GetExpandCollapsePattern().Expand()
+            time.sleep(0.6)
+            popup = auto.MenuControl(searchDepth=3, Name="Файл")
+            target = popup if popup.Exists(2, 0.2) else main_window
+            report = audit_window(target, "Меню „Файл“")
+            names = {e["name"] for e in report["elements"] if e["role"] == "MenuItemControl"}
+            for wanted in ("Изнеси всичко в CSV за друг компютър…",
+                           "Внеси от CSV от друг компютър…"):
+                if wanted not in names:
+                    report["problems"].append({"role": "MenuItemControl", "name": wanted,
+                                               "class": "липсва в менюто"})
+            reports.append(report)
+            press(proc.pid, main_window, "{Esc}{Esc}", 0.6)
+    except NotInFront as stopped:
+        reports.append({"window": "Проверката е прекъсната", "elements": [], "named_count": 0,
+                        "problems": [{"role": "Window", "name": "",
+                                      "class": f"отпред е друг прозорец — клавишите {stopped} "
+                                               "не са пратени; пусни проверката пак"}]})
     finally:
-        try:
-            main_window = wait_window(TITLE, timeout=2)
-            if main_window is not None:
-                main_window.SetActive()
-                auto.SendKeys("{Alt}{F4}", waitTime=1)
-        except Exception:
-            pass
+        # Затваряне без клавиши: Alt+F4 не бива да стигне до чужд прозорец.
+        proc.terminate()
         try:
             proc.wait(timeout=10)
         except subprocess.TimeoutExpired:

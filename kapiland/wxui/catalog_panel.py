@@ -2,12 +2,15 @@
 
 from __future__ import annotations
 
+import csv
+
 import wx
 
-from .. import catalog, gamedata, planner
+from .. import catalog, gamedata, planner, transfer
 from ..models import TYPE_LABELS, TYPE_ORDER, Product, type_label
 from ..timeutil import format_duration, parse_duration
-from .common import Form, RowList, confirm, message, read_only_text, show_error
+from .common import (Form, RowList, adopt_parent_font, confirm, fit_dialog, message,
+                     read_only_text, scroll_area, show_error)
 
 COLUMNS = [
     ("Продукт", 170, wx.LIST_FORMAT_LEFT),
@@ -43,8 +46,10 @@ class ProductDialog(wx.Dialog):
                          style=wx.DEFAULT_DIALOG_STYLE | wx.RESIZE_BORDER)
         self.original = product
         self.result: Product | None = None
+        adopt_parent_font(self)
+        content = scroll_area(self)
         outer = wx.BoxSizer(wx.VERTICAL)
-        form = Form(self)
+        form = Form(content)
         self.name = form.add("Име:", wx.TextCtrl)
         self.quality = form.add("Качество:", wx.TextCtrl)
         self.category = form.add("Категория:", wx.ComboBox, choices=list(catalog.CATEGORIES))
@@ -58,14 +63,18 @@ class ProductDialog(wx.Dialog):
         self.price = form.add("Цена за бройка:", wx.TextCtrl)
         self.note = form.add("Бележка:", wx.TextCtrl)
         outer.Add(form.sizer, 1, wx.EXPAND | wx.ALL, 12)
+        content.SetSizer(outer)
         buttons = wx.StdDialogButtonSizer()
         ok = wx.Button(self, wx.ID_OK, "Запиши")
         ok.SetDefault()
         buttons.AddButton(ok)
         buttons.AddButton(wx.Button(self, wx.ID_CANCEL, "Отказ"))
         buttons.Realize()
-        outer.Add(buttons, 0, wx.ALIGN_RIGHT | wx.ALL, 12)
-        self.SetSizerAndFit(outer)
+        top = wx.BoxSizer(wx.VERTICAL)
+        top.Add(content, 1, wx.EXPAND)
+        top.Add(buttons, 0, wx.ALIGN_RIGHT | wx.ALL, 12)
+        self.SetSizer(top)
+        fit_dialog(self, content, min_width=380)
 
         p = product or Product()
         self.name.SetValue(p.name)
@@ -213,32 +222,43 @@ class CatalogPanel(wx.Panel):
         self.list.SetFocus()
 
     def export_csv(self) -> None:
-        with wx.FileDialog(self.frame, "Изнасяне на каталога", defaultFile="katalog.csv",
+        """Каталогът, работещите таймери и компаниите в един файл — за друг компютър."""
+        with wx.FileDialog(self.frame, "Изнасяне на каталога, таймерите и компаниите",
+                           defaultFile="katalog.csv",
                            wildcard="CSV файл (*.csv)|*.csv",
                            style=wx.FD_SAVE | wx.FD_OVERWRITE_PROMPT) as dialog:
             if dialog.ShowModal() != wx.ID_OK:
                 return
             path = dialog.GetPath()
+        self.export_csv_to(path)
+
+    def export_csv_to(self, path: str) -> None:
         try:
-            count = catalog.export_csv(self.db, path)
+            counts = transfer.export_file(self.db, path)
         except OSError as exc:
             message(self.frame, f"Не можах да запиша файла: {exc}", "Грешка", wx.ICON_ERROR)
             return
-        self.frame.announce(f"Изнесени {count} продукта.")
+        self.frame.announce(transfer.export_summary(counts))
 
     def import_csv(self) -> None:
-        with wx.FileDialog(self.frame, "Внасяне на каталог", wildcard="CSV файл (*.csv)|*.csv",
+        with wx.FileDialog(self.frame, "Внасяне на каталог, таймери и компании",
+                           wildcard="CSV файл (*.csv)|*.csv",
                            style=wx.FD_OPEN | wx.FD_FILE_MUST_EXIST) as dialog:
             if dialog.ShowModal() != wx.ID_OK:
                 return
             path = dialog.GetPath()
+        self.import_csv_from(path)
+
+    def import_csv_from(self, path: str) -> None:
         try:
-            count = catalog.import_csv(self.db, path)
-        except (OSError, ValueError) as exc:
+            result = transfer.import_file(self.db, path)
+        except (OSError, ValueError, csv.Error) as exc:
             message(self.frame, f"Не можах да прочета файла: {exc}", "Грешка", wx.ICON_ERROR)
             return
+        # Не само каталогът: таймерите, филтрите по свят и заглавието също се менят.
+        self.frame.refresh_all(resort=True)
         self.refresh()
-        self.frame.announce(f"Внесени {count} продукта.")
+        self.frame.announce(transfer.import_summary(result))
 
     def import_lists(self) -> None:
         with wx.FileDialog(self.frame, "Внасяне на списък с изследвания или производство",

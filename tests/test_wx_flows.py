@@ -265,6 +265,83 @@ class TimerDialogTest(WxTestCase):
         finally:
             dlg.Destroy()
 
+    def edit(self, timer: Timer):
+        dlg = self.dialog(timer=self.frame.db.get_timer(timer.id))
+        dlg.EndModal = lambda code: None
+        return dlg
+
+    def test_editing_the_note_keeps_start_end_and_duration(self):
+        """Преди: поправка на бележката правеше 8-часов таймер едночасов."""
+        n = time_now()
+        timer = self.add(start_at=n - 7 * HOUR, end_at=n + HOUR + 42, duration_sec=8 * HOUR + 42,
+                         repeat_enabled=1)
+        dlg = self.edit(timer)
+        try:
+            dlg.note.SetValue("само бележка")
+            dlg._on_ok(None)
+            result = dlg.result
+            self.assertEqual(result.note, "само бележка")
+            self.assertEqual(result.duration_sec, 8 * HOUR + 42)
+            self.assertEqual(result.start_at, timer.start_at)
+            self.assertEqual(result.end_at, timer.end_at)  # и секундите остават
+        finally:
+            dlg.Destroy()
+
+    def test_moving_the_end_keeps_the_start(self):
+        from kapiland.timeutil import format_dt
+
+        n = time_now()
+        timer = self.add(start_at=n - 2 * HOUR, end_at=n + HOUR, duration_sec=3 * HOUR)
+        dlg = self.edit(timer)
+        try:
+            dlg.end.SetValue(format_dt(n + 5 * HOUR, "%d.%m.%Y %H:%M"))
+            dlg._on_ok(None)
+            result = dlg.result
+            self.assertEqual(result.start_at, timer.start_at)
+            self.assertAlmostEqual(result.duration_sec, 7 * HOUR, delta=60)
+        finally:
+            dlg.Destroy()
+
+    def test_ready_is_not_announced_again_after_fixing_a_note(self):
+        from kapiland.timeutil import format_dt
+
+        n = time_now()
+        timer = self.add(start_at=n - 2 * HOUR, end_at=n - HOUR, duration_sec=HOUR)
+        self.frame.db.set_timer_fields(timer.id, notified_at=n - HOUR)
+        dlg = self.edit(timer)
+        try:
+            dlg.note.SetValue("бележка")
+            dlg._on_ok(None)
+            self.assertEqual(dlg.result.notified_at, n - HOUR)
+        finally:
+            dlg.Destroy()
+        dlg = self.edit(timer)
+        try:
+            dlg.end.SetValue(format_dt(n + 3 * HOUR, "%d.%m.%Y %H:%M"))
+            dlg._on_ok(None)
+            self.assertIsNone(dlg.result.notified_at)  # нов час — ново известие
+        finally:
+            dlg.Destroy()
+
+    def test_typed_product_name_brings_the_remembered_values(self):
+        from kapiland.models import Product
+        from kapiland.wxui.timer_dialog import MODE_DURATION
+
+        self.frame.db.upsert_product(Product(name="Бензин", default_duration_sec=8 * HOUR,
+                                             default_quantity=1000,
+                                             building="Химически фабрики"))
+        dlg = self.dialog()
+        try:
+            dlg.mode.SetSelection(MODE_DURATION)
+            dlg._on_mode()
+            dlg.product.SetValue("бензин")       # написано, не избрано от списъка
+            dlg._on_product_blur(wx.FocusEvent(wx.wxEVT_KILL_FOCUS))
+            self.assertEqual(dlg.duration.GetValue(), "08:00:00")
+            self.assertEqual(dlg.quantity.GetValue(), "1000")
+            self.assertEqual(dlg.building.GetValue(), "Химически фабрики")
+        finally:
+            dlg.Destroy()
+
     def test_hidden_fields_follow_the_mode(self):
         from kapiland.wxui.timer_dialog import MODE_DURATION, MODE_END
 
@@ -320,6 +397,86 @@ class ImportDialogTest(WxTestCase):
             dlg.Destroy()
 
 
+class CsvTransferTest(WxTestCase):
+    """„Изнеси в CSV“ на единия компютър, „Внеси от CSV“ на другия."""
+
+    def export_from_other_computer(self) -> str:
+        from kapiland import transfer
+        from kapiland.db import Database
+
+        other = Database(":memory:")
+        try:
+            n = time_now()
+            other.upsert_account(Account(world="Холандска единица", name="Делта",
+                                         buildings="Текстилни фабрики"))
+            other.add_timer(Timer(product="Джинси", quantity=1500, line="Делта",
+                                  world="Холандска единица", start_at=n,
+                                  end_at=n + 5 * HOUR, duration_sec=5 * HOUR))
+            other.add_timer(Timer(product="Кожа", line="Делта", world="Холандска единица",
+                                  start_at=n - 2 * HOUR, end_at=n - HOUR, duration_sec=HOUR))
+            path = os.path.join(tempfile.mkdtemp(prefix="kapilands-csv"), "katalog.csv")
+            transfer.export_file(other, path)
+            return path
+        finally:
+            other.close()
+
+    def test_imported_timers_show_up_in_the_timers_list(self):
+        path = self.export_from_other_computer()
+        frame = self.frame
+        frame.refresh_all(resort=True)
+        self.assertEqual(frame.timers.list.GetItemCount(), 0)
+        frame.show_page(2)
+
+        frame.catalog.import_csv_from(path)
+
+        timers = frame.timers
+        self.assertEqual(timers.list.GetItemCount(), 2)
+        self.assertEqual([timers.list.GetItemText(i, 1) for i in range(2)], ["Кожа", "Джинси"])
+        self.assertTrue(timers.list.GetItemText(0, 0).startswith("ПРОПУСНАТО от"))
+        self.assertIn("Холандска единица", timers.world_filter.GetItems())
+        self.assertEqual(frame.GetTitle(), "Kapilands Таймер — готови: 1")
+        said = frame.speaker.said[-1]
+        self.assertIn("2 таймера и 1 компания", said)
+        self.assertIn("раздел „Таймери“", said)
+        self.assertEqual(frame.GetStatusBar().GetStatusText(), said)
+
+    def test_importing_the_same_file_again_adds_nothing(self):
+        path = self.export_from_other_computer()
+        self.frame.catalog.import_csv_from(path)
+        self.frame.catalog.import_csv_from(path)
+        self.assertEqual(self.frame.timers.list.GetItemCount(), 2)
+        self.assertIn("2 таймера вече ги имаше", self.frame.speaker.said[-1])
+
+    def test_old_file_without_timers_is_explained(self):
+        path = os.path.join(tempfile.mkdtemp(prefix="kapilands-csv"), "old.csv")
+        Path(path).write_text("name;quality;category\nХляб;;Агрокултура\n", encoding="utf-8-sig")
+        self.frame.catalog.import_csv_from(path)
+        self.assertEqual(self.frame.timers.list.GetItemCount(), 0)
+        self.assertIn("няма таймери", self.frame.speaker.said[-1])
+
+    def test_wrong_file_is_a_message_not_a_silent_zero(self):
+        path = os.path.join(tempfile.mkdtemp(prefix="kapilands-csv"), "istoriya.csv")
+        Path(path).write_text("Потвърдено;Продукт\n01.01.2026;Хляб\n", encoding="utf-8-sig")
+        before = len(self.frame.speaker.said)
+        self.frame.catalog.import_csv_from(path)
+        self.assertTrue(any("Не можах да прочета файла" in m for m in self.messages))
+        self.assertEqual(len(self.frame.speaker.said), before)
+
+    def test_export_says_what_is_in_the_file(self):
+        self.add()
+        self.frame.db.upsert_account(Account(world="Немска двойка", name="Алфа"))
+        path = os.path.join(tempfile.mkdtemp(prefix="kapilands-csv"), "katalog.csv")
+        self.frame.catalog.export_csv_to(path)
+        self.assertIn("1 таймер и 1 компания", self.frame.speaker.said[-1])
+        self.assertIn("#timers", Path(path).read_text(encoding="utf-8-sig"))
+
+    def test_file_menu_offers_the_transfer(self):
+        menu = self.frame.GetMenuBar().GetMenu(0)
+        labels = [item.GetItemLabelText() for item in menu.GetMenuItems()]
+        self.assertIn("Изнеси всичко в CSV за друг компютър…", labels)
+        self.assertIn("Внеси от CSV от друг компютър…", labels)
+
+
 class AccountsPanelTest(WxTestCase):
     def test_idle_filter_and_summary(self):
         db = self.frame.db
@@ -334,6 +491,124 @@ class AccountsPanelTest(WxTestCase):
         panel.refresh()
         self.assertEqual(panel.list.GetItemCount(), 1)
         self.assertEqual(panel.list.GetItemText(0, 0), "Бета")
+
+
+class TextSizeTest(WxTestCase):
+    """WCAG 1.4.4: при по-голям текст растат и диалозите, и колоните."""
+
+    def big(self) -> float:
+        from kapiland.wxui.common import apply_font_scale
+
+        normal = self.frame.timers.list.GetFont().GetFractionalPointSize()
+        apply_font_scale(self.frame, 200)
+        return normal * 2
+
+    def test_every_dialog_follows_the_text_size(self):
+        from kapiland.wxui.accounts_panel import AccountDialog
+        from kapiland.wxui.app import HelpDialog
+        from kapiland.wxui.catalog_panel import ProductDialog
+        from kapiland.wxui.import_dialog import ImportDialog
+        from kapiland.wxui.timer_dialog import TimerDialog
+
+        expected = self.big()
+        frame = self.frame
+        dialogs = [
+            TimerDialog(frame, frame.db, frame.settings),
+            ProductDialog(frame, None),
+            AccountDialog(frame, frame.db),
+            ImportDialog(frame, frame.db, frame.settings, speak=lambda t: None),
+            HelpDialog(frame),
+        ]
+        def everything_in(window):
+            for child in window.GetChildren():
+                yield child
+                yield from everything_in(child)
+
+        try:
+            for dialog in dialogs:
+                wx.Yield()
+                controls = list(everything_in(dialog))
+                self.assertGreater(len(controls), 2, dialog.GetTitle())
+                for child in controls:
+                    self.assertAlmostEqual(
+                        child.GetFont().GetFractionalPointSize(), expected, delta=0.5,
+                        msg=f"{dialog.GetTitle()}: {child.GetName()}")
+        finally:
+            for dialog in dialogs:
+                dialog.Destroy()
+
+    def test_big_dialogs_stay_on_the_screen_with_their_buttons(self):
+        """При 200% диалогът не излиза от екрана; „Запиши“ е извън превъртаното."""
+        from kapiland.wxui.accounts_panel import AccountDialog
+        from kapiland.wxui.catalog_panel import ProductDialog
+        from kapiland.wxui.common import display_area
+        from kapiland.wxui.import_dialog import ImportDialog
+        from kapiland.wxui.timer_dialog import TimerDialog
+
+        self.big()
+        frame = self.frame
+        screen = display_area(frame)
+        dialogs = [
+            TimerDialog(frame, frame.db, frame.settings),
+            ProductDialog(frame, None),
+            AccountDialog(frame, frame.db),
+            ImportDialog(frame, frame.db, frame.settings, speak=lambda t: None),
+        ]
+        try:
+            for dialog in dialogs:
+                title = dialog.GetTitle()
+                size = dialog.GetSize()
+                self.assertLessEqual(size.width, screen.width, title)
+                self.assertLessEqual(size.height, screen.height, title)
+                ok = dialog.FindWindow(wx.ID_OK)
+                self.assertIs(ok.GetParent(), dialog, title)
+                # Малък екран: прозорецът се свива, бутонът остава видим в него.
+                dialog.SetSize(wx.Size(size.width, min(size.height, 320)))
+                dialog.Layout()
+                bottom = ok.GetPosition().y + ok.GetSize().height
+                self.assertLessEqual(bottom, dialog.GetClientSize().height, title)
+                area = ok.GetPrevSibling()
+                self.assertIsInstance(area, wx.ScrolledWindow, title)
+                self.assertGreater(area.GetVirtualSize().height, area.GetClientSize().height, title)
+        finally:
+            for dialog in dialogs:
+                dialog.Destroy()
+
+    def test_dialogs_keep_their_usual_size_at_normal_text(self):
+        from kapiland.wxui.import_dialog import ImportDialog
+        from kapiland.wxui.timer_dialog import TimerDialog
+
+        frame = self.frame
+        timer = TimerDialog(frame, frame.db, frame.settings)
+        importing = ImportDialog(frame, frame.db, frame.settings, speak=lambda t: None)
+        try:
+            self.assertEqual(timer.GetSize().width, timer.FromDIP(520))
+            self.assertEqual(importing.GetSize(), importing.FromDIP(wx.Size(1000, 780)))
+        finally:
+            timer.Destroy()
+            importing.Destroy()
+
+    def test_columns_grow_with_the_text(self):
+        timers = self.frame.timers.list
+        before = [timers.GetColumnWidth(i) for i in range(timers.GetColumnCount())]
+        self.big()
+        after = [timers.GetColumnWidth(i) for i in range(timers.GetColumnCount())]
+        self.assertEqual(after, [w * 2 for w in before])
+        needed = timers.GetTextExtent("ПРОПУСНАТО от вчера 17:00").GetWidth()
+        self.assertGreater(after[0], needed)
+
+    def test_countdown_column_is_scaled_too(self):
+        self.big()
+        panel = self.frame.timers
+        panel.set_countdown(True)
+        self.assertEqual(panel.list.GetColumnWidth(7), panel.list.FromDIP(95 * 2))
+        panel.set_countdown(False)
+        self.assertEqual(panel.list.GetColumnCount(), 7)
+
+    def test_details_field_is_tall_enough_for_its_lines(self):
+        self.big()
+        details = self.frame.timers.details
+        self.assertGreaterEqual(details.GetMinSize().GetHeight(), 3 * details.GetCharHeight())
 
 
 class SettingsPanelTest(WxTestCase):

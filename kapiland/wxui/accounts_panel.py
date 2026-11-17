@@ -7,7 +7,8 @@ import wx
 from .. import catalog, planner
 from ..models import Account, TimerStatus
 from ..timeutil import format_when, now as time_now
-from .common import Form, RowList, confirm, read_only_text, show_error
+from .common import (Form, RowList, adopt_parent_font, confirm, fit_dialog, read_only_text,
+                     scroll_area, show_error)
 
 ALL_WORLDS = "Всички светове"
 SHOW_ALL, SHOW_IDLE, SHOW_BUILDING = 0, 1, 2
@@ -29,9 +30,11 @@ class AccountDialog(wx.Dialog):
         self.db = db
         self.original = account
         self.result: Account | None = None
+        adopt_parent_font(self)
 
+        content = scroll_area(self)
         outer = wx.BoxSizer(wx.VERTICAL)
-        form = Form(self)
+        form = Form(content)
         worlds = list(dict.fromkeys(list(catalog.KNOWN_WORLDS) + db.list_worlds()))
         self.world = form.add("Свят:", wx.ComboBox, choices=worlds)
         self.name = form.add("Име на компанията:", wx.TextCtrl)
@@ -41,6 +44,7 @@ class AccountDialog(wx.Dialog):
                                      choices=catalog.building_names(), style=wx.CB_READONLY)
         self.note = form.add("Бележка:", wx.TextCtrl)
         outer.Add(form.sizer, 1, wx.EXPAND | wx.ALL, 12)
+        content.SetSizer(outer)
 
         buttons = wx.StdDialogButtonSizer()
         ok = wx.Button(self, wx.ID_OK, "Запиши")
@@ -48,9 +52,11 @@ class AccountDialog(wx.Dialog):
         buttons.AddButton(ok)
         buttons.AddButton(wx.Button(self, wx.ID_CANCEL, "Отказ"))
         buttons.Realize()
-        outer.Add(buttons, 0, wx.ALIGN_RIGHT | wx.ALL, 12)
-        self.SetSizerAndFit(outer)
-        self.SetMinSize(self.FromDIP(wx.Size(460, -1)))
+        top = wx.BoxSizer(wx.VERTICAL)
+        top.Add(content, 1, wx.EXPAND)
+        top.Add(buttons, 0, wx.ALIGN_RIGHT | wx.ALL, 12)
+        self.SetSizer(top)
+        fit_dialog(self, content, min_width=460)
 
         if account:
             self.world.SetValue(account.world)

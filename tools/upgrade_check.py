@@ -20,7 +20,7 @@
 
 Употреба:
     python tools/upgrade_check.py --old път\\Kapilands-Taymer-2.0-Setup.exe
-        [--new dist\\Kapilands-Taymer-2.1-Setup.exe] [--data папка-с-данни]
+        [--new dist\\Kapilands-Taymer-2.2-Setup.exe] [--data папка-с-данни]
 Докато работи (около минута), не пиши на клавиатурата.
 Изход 0 = обновяването е чисто.
 """
@@ -165,7 +165,7 @@ def compare(before: dict, after: dict) -> None:
 def main() -> int:
     parser = argparse.ArgumentParser()
     parser.add_argument("--old", required=True, help="инсталатор на старата версия")
-    parser.add_argument("--new", default=str(ROOT / "dist" / "Kapilands-Taymer-2.1-Setup.exe"))
+    parser.add_argument("--new", default=str(ROOT / "dist" / "Kapilands-Taymer-2.2-Setup.exe"))
     parser.add_argument("--data", default=str(Path(os.environ["APPDATA"]) / "KapilandsTimer"),
                         help="папка с данни от старата версия (само се чете)")
     args = parser.parse_args()

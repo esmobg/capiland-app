@@ -53,6 +53,37 @@ def build_message(timer: Timer, kind: str, now: float) -> tuple[str, str]:
     return (f"Готово: {name}{where}", action)
 
 
+def _names(events: list[Event], limit: int = 4) -> str:
+    names = ", ".join(e.timer.display_name for e in events[:limit])
+    if len(events) > limit:
+        names += f" и още {len(events) - limit}"
+    return names
+
+
+def summarize_events(events: list[Event], summary_kind: str = EVENT_DUE) -> tuple[str, str, bool]:
+    """Едно известие за няколко събития наведнъж: (заглавие, текст, спешно).
+
+    „Готови са“ се казва само за наистина готовото. Предупрежденията „скоро“
+    се казват като „скоро“ — иначе четецът би обявил за готово нещо, на което
+    му остават още минути.
+    """
+    if len(events) == 1:
+        return events[0].title, events[0].message, events[0].urgent
+    ready = [e for e in events if e.kind != EVENT_PREWARN]
+    soon = [e for e in events if e.kind == EVENT_PREWARN]
+    if not ready:
+        return (f"Скоро ще са готови {len(soon)} неща",
+                f"{_names(soon)}. Приготви се да пуснеш следващото.", False)
+    if len(ready) == 1:
+        title, message = ready[0].title, ready[0].message
+    else:
+        head = "Пропуснати са" if summary_kind == EVENT_MISSED else "Готови са"
+        title, message = f"{head} {len(ready)} неща", _names(ready)
+    if soon:
+        message = f"{message.rstrip('.')}. Скоро: {_names(soon)}."
+    return title, message, True
+
+
 class Scheduler:
     """Свързва базата с известията."""
 
@@ -137,17 +168,7 @@ class Scheduler:
         sound_on = bool(self.settings.get("sound_enabled", True))
         toast_on = bool(self.settings.get("toast_enabled", True))
 
-        if len(events) == 1:
-            title, message, urgent = events[0].title, events[0].message, events[0].urgent
-        else:
-            names = ", ".join(e.timer.display_name for e in events[:4])
-            if len(events) > 4:
-                names += f" и още {len(events) - 4}"
-            word = "неща" if len(events) != 1 else "нещо"
-            title = f"Готови са {len(events)} {word}"
-            if summary_kind == EVENT_MISSED:
-                title = f"Пропуснати са {len(events)} {word}"
-            message, urgent = names, True
+        title, message, urgent = summarize_events(events, summary_kind)
 
         # Първо през екранния четец — с неговия глас и брайл.
         self.last_spoken = None
