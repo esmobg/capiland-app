@@ -7,7 +7,7 @@
 ; (UAC), който е на защитен екран и екранният четец може да не го прочете.
 
 #define AppName "Kapilands Таймер"
-#define AppVersion "2.1"
+#define AppVersion "2.2"
 #define AppExe "Kapilands-Taymer.exe"
 
 [Setup]
@@ -19,8 +19,8 @@ AppPublisher=esmobg
 AppPublisherURL=https://github.com/esmobg/capiland-app
 AppSupportURL=https://github.com/esmobg/capiland-app/issues
 AppUpdatesURL=https://github.com/esmobg/capiland-app/releases
-VersionInfoVersion=2.1.0.0
-VersionInfoProductVersion=2.1.0.0
+VersionInfoVersion=2.2.0.0
+VersionInfoProductVersion=2.2.0.0
 VersionInfoDescription={#AppName} — инсталатор
 
 PrivilegesRequired=lowest
@@ -38,7 +38,7 @@ CloseApplications=yes
 RestartApplications=no
 
 OutputDir=..\dist
-OutputBaseFilename=Kapilands-Taymer-2.1-Setup
+OutputBaseFilename=Kapilands-Taymer-2.2-Setup
 Compression=lzma2/max
 SolidCompression=yes
 WizardStyle=modern

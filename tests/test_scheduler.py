@@ -130,6 +130,31 @@ class SchedulerTest(unittest.TestCase):
         self.assertEqual(len(self.notifier.sent), 1)
         self.assertIn("Готови са 2", self.notifier.sent[0][0])
 
+    def test_two_warnings_at_once_are_not_announced_as_ready(self):
+        """Остават 10 минути — четецът не бива да каже „Готови са 2 неща“."""
+        self.db.add_timer(make_timer(product="Хляб"))
+        self.db.add_timer(make_timer(product="Сирене"))
+        sched = self.scheduler(prewarn_minutes=10)
+        events = sched.tick(now=NOW + HOUR - 5 * MINUTE)
+        self.assertEqual([e.kind for e in events], [EVENT_PREWARN, EVENT_PREWARN])
+        title, message, urgent = self.notifier.sent[0]
+        self.assertEqual(title, "Скоро ще са готови 2 неща")
+        self.assertNotIn("Готови са", title)
+        self.assertIn("Хляб", message)
+        self.assertFalse(urgent)
+
+    def test_ready_and_warning_together_are_told_apart(self):
+        self.db.add_timer(make_timer(product="Хляб"))
+        self.db.add_timer(make_timer(product="Сирене", end_at=NOW + HOUR + 5 * MINUTE))
+        sched = self.scheduler(prewarn_minutes=10)
+        sched.tick(now=NOW + HOUR - 30 * MINUTE)          # още нищо
+        events = sched.tick(now=NOW + HOUR)
+        self.assertEqual(sorted(e.kind for e in events), [EVENT_DUE, EVENT_PREWARN])
+        title, message, urgent = self.notifier.sent[0]
+        self.assertTrue(title.startswith("Готово: 500× Хляб"))
+        self.assertIn("Скоро: 500× Сирене", message)
+        self.assertTrue(urgent)
+
     # ------------------------------------------------------------------
 
     def test_catch_up_reports_timers_expired_while_closed(self):

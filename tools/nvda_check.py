@@ -239,6 +239,15 @@ def main() -> int:
             press("{Tab}", 1.5)
         press("{Esc}", 2)
         mark("catalog_end")
+
+        # Меню „Файл“: преносът към друг компютър (каталог, таймери, компании).
+        press("{F10}", 2)
+        press("{Down}", 2)   # отваря „Файл“ — „Внос на списък…“
+        press("{Down}", 2)   # „Изнеси всичко в CSV за друг компютър…“
+        press("{Down}", 2)   # „Внеси от CSV от друг компютър…“
+        press("{Esc}", 1)
+        press("{Esc}", 2)
+        mark("menu_end")
     finally:
         for proc in (helper,):
             if proc is not None and proc.poll() is None:
@@ -274,6 +283,8 @@ def main() -> int:
         ("Ctrl+3 — Каталог, редът казва и науката", "catalog", "product", ["Продукти", "Наука:"]),
         ("Enter — продукт, полето „Наука:“", "product", "catalog_end",
          ["Редактиране на продукт", "Наука:"]),
+        ("Меню „Файл“ — пренос с CSV към друг компютър", "catalog_end", "menu_end",
+         ["Изнеси всичко в CSV за друг компютър", "Внеси от CSV от друг компютър"]),
     ]
     report = [f"NVDA: {nvda}", f"Лог: {log_path}", ""]
     f3_parts = phrases[marks.get("f3", 0):marks.get("f4", 0)]

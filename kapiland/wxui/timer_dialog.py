@@ -15,12 +15,14 @@ from ..timeutil import (
     parse_datetime,
     parse_duration,
 )
-from .common import Form, read_only_text, show_error
+from .common import (Form, adopt_parent_font, fit_dialog, read_only_text, scroll_area,
+                     show_error)
 
 MODE_END = 0        # „Готово на“ — така се водят бележките
 MODE_DURATION = 1   # начало и времетраене
 MODE_REMAINING = 2  # оставащо време от играта
 MODE_LABELS = ["Готово на", "Начало и времетраене", "Оставащо време"]
+MIN_WIDTH = 520  # при 100% текст
 
 
 class TimerDialog(wx.Dialog):
@@ -32,8 +34,10 @@ class TimerDialog(wx.Dialog):
         self.settings = settings
         self.original = timer
         self.result: Timer | None = None
+        self._loaded_end = ""  # часът, с който е отворен таймерът за редакция
+        adopt_parent_font(self)
 
-        panel = self
+        panel = self.content = scroll_area(self)
         outer = wx.BoxSizer(wx.VERTICAL)
         form = Form(panel)
 
@@ -75,21 +79,27 @@ class TimerDialog(wx.Dialog):
         self.note = extra.add("Бележка:", wx.TextCtrl)
         outer.Add(extra.sizer, 0, wx.EXPAND | wx.ALL, 12)
 
+        panel.SetSizer(outer)
+
+        # Бутоните са извън превъртаната част — виждат се и при едър текст.
         buttons = wx.StdDialogButtonSizer()
-        ok = wx.Button(panel, wx.ID_OK, "Запиши")
+        ok = wx.Button(self, wx.ID_OK, "Запиши")
         ok.SetDefault()
         buttons.AddButton(ok)
-        buttons.AddButton(wx.Button(panel, wx.ID_CANCEL, "Отказ"))
+        buttons.AddButton(wx.Button(self, wx.ID_CANCEL, "Отказ"))
         buttons.Realize()
-        outer.Add(buttons, 0, wx.ALIGN_RIGHT | wx.ALL, 12)
-        self.SetSizerAndFit(outer)
-        self.SetMinSize(self.FromDIP(wx.Size(520, -1)))
+        top = wx.BoxSizer(wx.VERTICAL)
+        top.Add(panel, 1, wx.EXPAND)
+        top.Add(buttons, 0, wx.ALIGN_RIGHT | wx.ALL, 12)
+        self.SetSizer(top)
 
         self.Bind(wx.EVT_BUTTON, self._on_ok, id=wx.ID_OK)
         self.mode.Bind(wx.EVT_RADIOBOX, lambda _e: self._on_mode())
         self.world.Bind(wx.EVT_COMBOBOX, lambda _e: self._fill_companies())
         self.world.Bind(wx.EVT_TEXT, lambda _e: self._fill_companies())
         self.product.Bind(wx.EVT_COMBOBOX, lambda _e: self._on_product())
+        # И когато името е написано на ръка, а не избрано от списъка.
+        self.product.Bind(wx.EVT_KILL_FOCUS, self._on_product_blur)
         self.repeat.Bind(wx.EVT_CHECKBOX, lambda _e: self._on_repeat())
         for control in (self.end, self.start, self.duration, self.remaining,
                         self.quantity, self.product, self.quality):
@@ -135,7 +145,8 @@ class TimerDialog(wx.Dialog):
             self.quantity.SetValue(str(int(timer.quantity)) if float(timer.quantity).is_integer()
                                    else str(timer.quantity))
         self.mode.SetSelection(MODE_END)
-        self.end.SetValue(format_dt(timer.end_at, "%d.%m.%Y %H:%M"))
+        self._loaded_end = format_dt(timer.end_at, "%d.%m.%Y %H:%M")
+        self.end.SetValue(self._loaded_end)
         self.start.SetValue(format_dt(timer.start_at, "%d.%m.%Y %H:%M"))
         self.duration.SetValue(format_duration(timer.duration_sec))
         self.remaining.SetValue(format_duration(max(0, timer.end_at - time_now())))
@@ -158,6 +169,11 @@ class TimerDialog(wx.Dialog):
                 self.building.SetValue(product.building)
         self._update_preview()
 
+    def _on_product_blur(self, event) -> None:
+        event.Skip()
+        if self.original is None:  # при редакция стойностите са на таймера
+            self._on_product()
+
     def _on_mode(self) -> None:
         mode = self.mode.GetSelection()
         visible = {
@@ -171,8 +187,7 @@ class TimerDialog(wx.Dialog):
             label = control.GetPrevSibling()
             if isinstance(label, wx.StaticText):
                 label.Show(show)
-        self.Layout()
-        self.Fit()
+        fit_dialog(self, self.content, min_width=MIN_WIDTH)
         self._update_preview()
 
     def _on_repeat(self) -> None:
@@ -184,8 +199,16 @@ class TimerDialog(wx.Dialog):
         now = time_now()
         mode = self.mode.GetSelection()
         if mode == MODE_END:
+            original = self.original
+            if original is not None and self.end.GetValue().strip() == self._loaded_end:
+                # Часът не е пипан: началото и времетраенето остават същите.
+                # Иначе поправка на бележката би скъсила следващите цикли и
+                # времето в каталога до „колкото остава сега“.
+                return original.start_at, original.end_at, original.duration_sec
             end = parse_datetime(self.end.GetValue(), now)
             start = now if end > now else end
+            if original is not None and 0 < original.start_at < end:
+                start = original.start_at  # мести се краят, не началото
             return start, end, max(0, int(round(end - start)))
         if mode == MODE_DURATION:
             start = parse_datetime(self.start.GetValue() or "сега", now)
@@ -234,6 +257,7 @@ class TimerDialog(wx.Dialog):
             return
 
         timer = self.original or Timer()
+        old_end = timer.end_at
         timer.world = self.world.GetValue().strip()
         timer.line = self.company.GetValue().strip()
         timer.type = TYPE_ORDER[max(0, self.kind.GetSelection())]
@@ -250,7 +274,9 @@ class TimerDialog(wx.Dialog):
             timer.status = TimerStatus.RUNNING.value
             timer.cycle_no = 1
             timer.created_at = time_now()
-        else:
+        elif timer.end_at != old_end:
+            # Нов час — известията започват отначало. При същия час вече
+            # казаното „Готово“ не се повтаря заради поправена бележка.
             timer.notified_at = timer.prewarned_at = timer.reminded_at = None
             timer.missed = 0
         self.settings.set("last_type", timer.type)

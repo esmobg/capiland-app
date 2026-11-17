@@ -104,8 +104,16 @@ def read_only_text(parent: wx.Window, lines: int = 3) -> wx.TextCtrl:
     # Обикновено поле, не RichEdit: не праща събития за всяка промяна на текста.
     style = wx.TE_MULTILINE | wx.TE_READONLY
     control = wx.TextCtrl(parent, style=style)
-    control.SetMinSize((-1, max(2, lines) * 20))
+    control.text_lines = max(2, lines)
+    fit_text_height(control)
     return control
+
+
+def fit_text_height(control: wx.TextCtrl) -> None:
+    """Височина за толкова реда с текущия шрифт — и при 200% текстът се побира."""
+    lines = getattr(control, "text_lines", 0)
+    if lines:
+        control.SetMinSize((-1, max(lines * 20, lines * control.GetCharHeight() + 10)))
 
 
 def message(parent, text: str, title: str = "Kapilands Таймер",
@@ -128,20 +136,98 @@ def show_error(parent, text: str, focus: wx.Window | None = None) -> None:
 
 
 def apply_font_scale(window: wx.Window, percent: int) -> None:
+    """Размер на текста 100–200% за прозореца и всичко в него (WCAG 1.4.4).
+
+    Заедно с текста растат колоните на списъците и полетата за четене —
+    иначе при 200% думите се режат. Диалозите, отворени след това, взимат
+    размера с ``adopt_parent_font``.
+    """
+    percent = max(100, min(200, percent))
     base = wx.SystemSettings.GetFont(wx.SYS_DEFAULT_GUI_FONT)
     font = wx.Font(base)
-    font.SetFractionalPointSize(base.GetFractionalPointSize() * max(100, min(200, percent)) / 100)
+    font.SetFractionalPointSize(base.GetFractionalPointSize() * percent / 100)
+    window.font_scale = percent
 
     def walk(win: wx.Window) -> None:
         win.SetFont(font)
+        if isinstance(win, RowList):
+            win.scale_columns(percent)
+        elif isinstance(win, wx.TextCtrl):
+            fit_text_height(win)
         for child in win.GetChildren():
             walk(child)
+        if win.GetSizer() is not None:
+            win.Layout()  # и разделите, които не са на екрана в момента
 
     walk(window)
     window.Layout()
 
 
+def adopt_parent_font(dialog: wx.Window) -> int:
+    """Диалогът взима размера на текста от главния прозорец.
+
+    Вика се веднага след създаването на диалога, преди елементите му: те
+    наследяват шрифта сами. Връща мащаба в проценти — за списъците вътре.
+    """
+    parent = dialog.GetParent()
+    if parent is None:
+        return 100
+    dialog.SetFont(parent.GetFont())
+    dialog.font_scale = int(getattr(parent, "font_scale", 100) or 100)
+    return dialog.font_scale
+
+
+def display_area(window: wx.Window) -> wx.Rect:
+    """Свободната част на екрана, на който е прозорецът (без лентата на задачите)."""
+    index = wx.Display.GetFromWindow(window.GetParent() or window)
+    return wx.Display(0 if index == wx.NOT_FOUND else index).GetClientArea()
+
+
+def scroll_area(dialog: wx.Dialog) -> wx.ScrolledWindow:
+    """Място за полетата на диалог, което се превърта, когато не се побира.
+
+    При едър текст на малък екран диалогът би излязъл извън екрана и бутоните
+    му биха останали отдолу. Полетата се създават тук, а бутоните — направо в
+    диалога, за да се виждат винаги. Фокусираното поле се превърта само в
+    изгледа.
+    """
+    area = wx.ScrolledWindow(dialog, style=wx.TAB_TRAVERSAL)
+    area.SetLabel("")  # иначе четецът може да изговори името на класа
+    return area
+
+
+def fit_dialog(dialog: wx.Dialog, area: wx.ScrolledWindow | None = None,
+               min_width: int = 0, min_height: int = 0) -> None:
+    """Размер по съдържанието, но никога по-голям от екрана.
+
+    ``min_width`` и ``min_height`` са при 100% текст и растат с мащаба му.
+    """
+    scale = int(getattr(dialog, "font_scale", 100) or 100) / 100
+    step = max(8, dialog.GetCharHeight())
+    if area is not None:
+        area.SetScrollRate(step, step)
+        area.SetMinSize(area.GetSizer().CalcMin())  # колкото иска съдържанието
+    dialog.SetMinSize(wx.DefaultSize)
+    wanted = dialog.GetSizer().ComputeFittingWindowSize(dialog)
+    wanted.IncTo(dialog.FromDIP(wx.Size(int(min_width * scale), int(min_height * scale))))
+    wanted.DecTo(display_area(dialog).GetSize())
+    if area is not None:
+        area.SetMinSize(wx.Size(step * 12, step * 4))  # по-малко от това — превърта се
+    dialog.SetSize(wanted)
+    dialog.Layout()
+
+
 # ------------------------------------------------------------ списък
+
+def _inherited_scale(window: wx.Window | None) -> int:
+    """Мащабът на текста, зададен на прозореца или диалога, в който е елементът."""
+    while window is not None:
+        scale = getattr(window, "font_scale", None)
+        if scale:
+            return int(scale)
+        window = window.GetParent()
+    return 100
+
 
 class RowList(wx.ListCtrl):
     """Отчетен списък, който пази фокуса и не се пренарежда сам.
@@ -157,12 +243,36 @@ class RowList(wx.ListCtrl):
             self.SetName(name)
         if checkboxes:
             self.EnableCheckBoxes(True)
+        self._widths: list[int] = []
+        self._scale = _inherited_scale(parent)
+        self.column_count = 0
         for index, (title, width, align) in enumerate(columns):
-            self.InsertColumn(index, title, align, self.FromDIP(width))
-        self.column_count = len(columns)
+            self.add_column(index, title, width, align)
         self._ids: list[int] = []
         self._states: dict[int, str] = {}
         self.palette: dict | None = None
+
+    # --- колони ---
+    def _scaled(self, width: int) -> int:
+        return self.FromDIP(int(round(width * self._scale / 100)))
+
+    def add_column(self, index: int, title: str, width: int, align: int) -> None:
+        self.InsertColumn(index, title, align, self._scaled(width))
+        self._widths.insert(index, width)
+        self.column_count = len(self._widths)
+
+    def remove_column(self, index: int) -> None:
+        self.DeleteColumn(index)
+        del self._widths[index]
+        self.column_count = len(self._widths)
+
+    def scale_columns(self, percent: int) -> None:
+        """Колоните следват размера на текста, за да не се реже при 200%."""
+        if percent == self._scale:
+            return
+        self._scale = percent
+        for index, width in enumerate(self._widths):
+            self.SetColumnWidth(index, self._scaled(width))
 
     # --- id ---
     def ids(self) -> list[int]:

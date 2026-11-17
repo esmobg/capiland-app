@@ -14,7 +14,8 @@ from ..speech import JawsBackend, NvdaBackend, Speaker, UiaBackend
 from ..timeutil import now as time_now
 from .accounts_panel import AccountsPanel
 from .catalog_panel import CatalogPanel
-from .common import apply_font_scale, palette_for, read_only_text
+from .common import (adopt_parent_font, apply_font_scale, fit_dialog, palette_for,
+                     read_only_text)
 from .history_panel import HistoryPanel
 from .import_dialog import ImportDialog
 from .settings_panel import SettingsPanel
@@ -32,9 +33,10 @@ class HelpDialog(wx.Dialog):
     def __init__(self, parent) -> None:
         super().__init__(parent, title="Клавишни комбинации",
                          style=wx.DEFAULT_DIALOG_STYLE | wx.RESIZE_BORDER)
+        adopt_parent_font(self)
         sizer = wx.BoxSizer(wx.VERTICAL)
         sizer.Add(wx.StaticText(self, label="Клавиши:"), 0, wx.ALL, 8)
-        text = read_only_text(self, lines=16)
+        text = read_only_text(self, lines=6)  # най-малко толкова; расте с прозореца
         text.SetName("Клавиши")
         text.SetValue("\n".join(f"{keys} — {what}" for keys, what in a11y.KEYBOARD_HELP))
         sizer.Add(text, 1, wx.EXPAND | wx.LEFT | wx.RIGHT, 8)
@@ -42,7 +44,7 @@ class HelpDialog(wx.Dialog):
         close.SetDefault()
         sizer.Add(close, 0, wx.ALIGN_RIGHT | wx.ALL, 8)
         self.SetSizer(sizer)
-        self.SetSize(self.FromDIP(wx.Size(620, 520)))
+        fit_dialog(self, min_width=620, min_height=520)
         self.CentreOnParent()
         wx.CallAfter(text.SetFocus)
 
@@ -107,6 +109,14 @@ class MainFrame(wx.Frame):
 
         file_menu = wx.Menu()
         item(file_menu, "&Внос на списък…\tCtrl+I", self.open_import)
+        file_menu.AppendSeparator()
+        # Същото като бутоните в „Каталог“ — оттук се намира от всеки раздел.
+        item(file_menu, "И&знеси всичко в CSV за друг компютър…",
+             lambda: self.catalog.export_csv(),
+             "Каталогът, работещите таймери и компаниите в един файл")
+        item(file_menu, "В&неси от CSV от друг компютър…",
+             lambda: self.catalog.import_csv(),
+             "Внася каталог, таймери и компании от файл, изнесен от приложението")
         file_menu.AppendSeparator()
         item(file_menu, "&Изход\tAlt+F4", self.Close)
         bar.Append(file_menu, "&Файл")

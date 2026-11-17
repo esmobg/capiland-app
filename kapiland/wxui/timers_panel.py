@@ -147,10 +147,9 @@ class TimersPanel(wx.Panel):
         self._countdown = enabled
         if enabled:
             title, width, align = COUNTDOWN_COLUMN
-            self.list.InsertColumn(len(COLUMNS), title, align, self.FromDIP(width))
+            self.list.add_column(len(COLUMNS), title, width, align)
         else:
-            self.list.DeleteColumn(len(COLUMNS))
-        self.list.column_count = len(self._columns())
+            self.list.remove_column(len(COLUMNS))
         self.list._ids = []  # следващото обновяване преначертава
         self.refresh(resort=True)
 

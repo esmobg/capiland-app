@@ -8,14 +8,14 @@
 
 from __future__ import annotations
 
-import csv
+import math
 import re
 from pathlib import Path
 from typing import Iterable
 
 from . import gamedata
 from .db import Database
-from .models import Product, TimerType
+from .models import TYPE_ORDER, Product, TimerType
 
 # Отраслите, които самата игра назовава на страницата „За Kapilands?“:
 # говеда, агрокултура, високотехнологична продукция, мода.
@@ -360,7 +360,8 @@ def upgrade_catalog_v3(db: Database) -> int:
 
 # ------------------------------------------------- списъци в текстов вид
 
-def _read_text(path: str | Path) -> str:
+def read_text(path: str | Path) -> str:
+    """Текстът на файла: UTF-8 (и с BOM), иначе Windows-1251."""
     raw = Path(path).read_bytes()
     try:
         return raw.decode("utf-8-sig")
@@ -385,7 +386,7 @@ def import_lists(db: Database, path: str | Path) -> dict:
     продукти се **презаписва**; времена, количества и цени не се пипат.
     Връща {"kind", "groups", "products", "added"}.
     """
-    kind, groups = gamedata.parse_groups(_read_text(path))
+    kind, groups = gamedata.parse_groups(read_text(path))
     if kind is None:
         kind = _kind_from_name(path)
     if kind is None:
@@ -513,59 +514,61 @@ def product_names(db: Database) -> list[str]:
 
 
 def export_csv(db: Database, path: str | Path) -> int:
-    """Записва каталога в CSV (с BOM, за да се отваря правилно в Excel)."""
-    products = db.list_products()
-    with open(path, "w", newline="", encoding="utf-8-sig") as handle:
-        writer = csv.writer(handle, delimiter=";")
-        writer.writerow(CSV_COLUMNS)
-        for p in products:
-            writer.writerow([getattr(p, column) for column in CSV_COLUMNS])
-    return len(products)
+    """Записва каталога в CSV — заедно с работещите таймери и компаниите.
+
+    Целият файл се прави от ``transfer.export_file``; тук се връща само
+    броят на продуктите.
+    """
+    from . import transfer
+
+    return transfer.export_file(db, path)["products"]
 
 
 def import_csv(db: Database, path: str | Path) -> int:
-    """Чете каталог от CSV. Съществуващите продукти се обновяват по име."""
-    count = 0
-    with open(path, "r", newline="", encoding="utf-8-sig") as handle:
-        sample = handle.read(2048)
-        handle.seek(0)
-        delimiter = ";" if sample.count(";") >= sample.count(",") else ","
-        reader = csv.DictReader(handle, delimiter=delimiter)
-        for row in reader:
-            name = (row.get("name") or "").strip()
-            if not name:
-                continue
-            quality = (row.get("quality") or "").strip()
-            product = (db.get_product(name, quality)
-                       or Product(name=name, quality=quality))
-            product.name = name
-            product.quality = quality
-            product.category = (row.get("category") or product.category).strip()
-            product.building = (row.get("building") or product.building).strip()
-            product.research = (row.get("research") or product.research).strip()
-            product.default_type = (row.get("default_type")
-                                    or product.default_type).strip()
-            product.default_duration_sec = _as_int(
-                row.get("default_duration_sec"), product.default_duration_sec)
-            product.default_quantity = _as_float(
-                row.get("default_quantity"), product.default_quantity)
-            product.unit_cost = _as_float(row.get("unit_cost"), product.unit_cost)
-            product.unit_price = _as_float(row.get("unit_price"), product.unit_price)
-            product.note = (row.get("note") or product.note).strip()
-            db.upsert_product(product)
-            count += 1
-    return count
+    """Чете CSV от ``export_csv``. Съществуващите продукти се обновяват по име.
+
+    Таймерите и компаниите във файла също се внасят (``transfer.import_file``).
+    Връща броя на продуктите.
+    """
+    from . import transfer
+
+    return transfer.import_file(db, path)["products"]
 
 
-def _as_int(value, default: int) -> int:
+def import_product_row(db: Database, row: dict) -> bool:
+    """Един ред от каталога (колона → стойност). False, ако няма име."""
+    name = (row.get("name") or "").strip()
+    if not name:
+        return False
+    quality = (row.get("quality") or "").strip()
+    product = db.get_product(name, quality) or Product(name=name, quality=quality)
+    product.name = name
+    product.quality = quality
+    product.category = (row.get("category") or product.category).strip()
+    product.building = (row.get("building") or product.building).strip()
+    product.research = (row.get("research") or product.research).strip()
+    kind = (row.get("default_type") or product.default_type).strip()
+    product.default_type = kind if kind in TYPE_ORDER else TimerType.PRODUCTION.value
+    product.default_duration_sec = max(0, as_int(
+        row.get("default_duration_sec"), product.default_duration_sec))
+    product.default_quantity = as_float(row.get("default_quantity"), product.default_quantity)
+    product.unit_cost = as_float(row.get("unit_cost"), product.unit_cost)
+    product.unit_price = as_float(row.get("unit_price"), product.unit_price)
+    product.note = (row.get("note") or product.note).strip()
+    db.upsert_product(product)
+    return True
+
+
+def as_float(value, default: float) -> float:
+    """Число от клетка на CSV; приема и десетична запетая (Excel на български)."""
     try:
-        return int(float(str(value).replace(",", ".")))
+        number = float(str(value).replace("\u00a0", "").replace(" ", "")
+                       .replace(",", "."))
     except (TypeError, ValueError):
         return default
+    return number if math.isfinite(number) else default
 
 
-def _as_float(value, default: float) -> float:
-    try:
-        return float(str(value).replace(",", "."))
-    except (TypeError, ValueError):
-        return default
+def as_int(value, default: int) -> int:
+    number = as_float(value, float("nan"))
+    return default if math.isnan(number) else int(number)

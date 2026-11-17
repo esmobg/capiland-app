@@ -8,7 +8,8 @@ from .. import catalog, importer
 from ..models import TYPE_LABELS, TYPE_ORDER, type_label
 from ..timeutil import format_when, now as time_now
 from .timers_panel import quantity_text
-from .common import RowList, labeled, read_only_text, show_error
+from .common import (RowList, adopt_parent_font, display_area, fit_dialog, labeled,
+                     read_only_text, scroll_area, show_error)
 
 COLUMNS = [
     ("Кога", 150, wx.LIST_FORMAT_LEFT),
@@ -19,6 +20,7 @@ COLUMNS = [
     ("Дейност", 100, wx.LIST_FORMAT_LEFT),
     ("Бележка", 160, wx.LIST_FORMAT_LEFT),
 ]
+WIDTH, HEIGHT = 1000, 780  # при 100% текст
 
 
 class ImportDialog(wx.Dialog):
@@ -30,31 +32,36 @@ class ImportDialog(wx.Dialog):
         self.speak = speak
         self.result: importer.ImportResult | None = None
         self.applied: dict | None = None
+        adopt_parent_font(self)
 
+        content = scroll_area(self)
         sizer = wx.BoxSizer(wx.VERTICAL)
-        sizer.Add(wx.StaticText(
-            self, label="Постави бележките си така, както ги водиш. Данни за вход "
-                        "(потребителски имена и пароли) се пропускат и не се пазят."),
-            0, wx.ALL, 8)
+        intro = wx.StaticText(
+            content, label="Постави бележките си така, както ги водиш. Данни за вход "
+                        "(потребителски имена и пароли) се пропускат и не се пазят.")
+        # При едър текст изречението се пренася, вместо да се отреже вдясно.
+        intro.Wrap(min(self.FromDIP(WIDTH * self.font_scale // 100),
+                       display_area(self).width) - self.FromDIP(40))
+        sizer.Add(intro, 0, wx.ALL, 8)
 
-        self.text = labeled(self, sizer, "Постави списъка тук:", wx.TextCtrl,
+        self.text = labeled(content, sizer, "Постави списъка тук:", wx.TextCtrl,
                             style=wx.TE_MULTILINE | wx.TE_DONTWRAP, proportion=2)
 
         row = wx.BoxSizer(wx.HORIZONTAL)
-        row.Add(wx.StaticText(self, label="Свят за редовете без посочен свят:"),
+        row.Add(wx.StaticText(content, label="Свят за редовете без посочен свят:"),
                 0, wx.ALIGN_CENTER_VERTICAL | wx.RIGHT, 6)
         worlds = list(dict.fromkeys(list(catalog.KNOWN_WORLDS) + db.list_worlds()))
-        self.world = wx.ComboBox(self, choices=worlds)
+        self.world = wx.ComboBox(content, choices=worlds)
         self.world.SetName("Свят за редовете без посочен свят")
         self.world.SetValue(str(settings.get("default_world", "") or ""))
         row.Add(self.world, 1, wx.RIGHT, 8)
-        self.parse_button = wx.Button(self, label="&Разпознай")
+        self.parse_button = wx.Button(content, label="&Разпознай")
         row.Add(self.parse_button, 0)
         sizer.Add(row, 0, wx.EXPAND | wx.ALL, 8)
 
-        self.summary = labeled(self, sizer, "Обобщение:", read_only_text, lines=3)
+        self.summary = labeled(content, sizer, "Обобщение:", read_only_text, lines=3)
 
-        self.list = labeled(self, sizer, "Разпознати таймери (интервалът слага или маха отметка):",
+        self.list = labeled(content, sizer, "Разпознати таймери (интервалът слага или маха отметка):",
                             RowList, COLUMNS, checkboxes=True, proportion=3)
 
         actions = wx.WrapSizer(wx.HORIZONTAL)
@@ -65,22 +72,30 @@ class ImportDialog(wx.Dialog):
             ("Смени &дейността на избрания…", self._change_type),
             ("Смени &света на избрания…", self._change_world),
         ):
-            button = wx.Button(self, label=label)
+            button = wx.Button(content, label=label)
             button.Bind(wx.EVT_BUTTON, lambda _e, h=handler: h())
             actions.Add(button, 0, wx.ALL, 4)
             self.action_buttons.append(button)
         sizer.Add(actions, 0, wx.EXPAND | wx.LEFT | wx.RIGHT, 4)
 
-        self.unrecognized = labeled(self, sizer, "Неразпознати редове:", read_only_text, lines=3)
+        self.unrecognized = labeled(content, sizer, "Неразпознати редове:", read_only_text, lines=3)
+
+        # Двете големи полета се свиват първи; ако и така не стига (едър текст на
+        # малък екран), частта над бутоните се превърта.
+        self.text.SetMinSize(self.FromDIP(wx.Size(200, 70)))
+        self.list.SetMinSize(self.FromDIP(wx.Size(200, 90)))
+        content.SetSizer(sizer)
 
         buttons = wx.StdDialogButtonSizer()
         self.ok = wx.Button(self, wx.ID_OK, "&Внеси отметнатите")
         buttons.AddButton(self.ok)
         buttons.AddButton(wx.Button(self, wx.ID_CANCEL, "Затвори"))
         buttons.Realize()
-        sizer.Add(buttons, 0, wx.ALIGN_RIGHT | wx.ALL, 8)
-        self.SetSizer(sizer)
-        self.SetSize(self.FromDIP(wx.Size(1000, 780)))
+        top = wx.BoxSizer(wx.VERTICAL)
+        top.Add(content, 1, wx.EXPAND)
+        top.Add(buttons, 0, wx.ALIGN_RIGHT | wx.ALL, 8)
+        self.SetSizer(top)
+        fit_dialog(self, content, min_width=WIDTH, min_height=HEIGHT)
         self.CentreOnParent()
 
         self.parse_button.Bind(wx.EVT_BUTTON, lambda _e: self._parse())
